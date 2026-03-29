@@ -118,6 +118,12 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     const rawBody = await request.text();
 
     // Verify signature if a webhook secret is configured
+    if (!this.config.webhookSecret) {
+      this.logger.warn(
+        "No webhookSecret configured. Webhook payloads are not being verified. " +
+        "Set ZERNIO_WEBHOOK_SECRET to enable HMAC-SHA256 signature verification.",
+      );
+    }
     if (this.config.webhookSecret) {
       const { signature } = extractWebhookHeaders(request);
       if (!signature || !verifyWebhookSignature(rawBody, signature, this.config.webhookSecret)) {
@@ -404,7 +410,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
 
     await this.api.editMessage(conversationId, messageId, {
       accountId,
-      message: text || undefined,
+      text: text || undefined,
     });
 
     return {
@@ -457,11 +463,15 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
    * Remove a reaction from a message.
    * Supported on: Telegram (send empty reaction), WhatsApp (send empty emoji).
    * Unsupported on other platforms (API returns 400).
+   *
+   * Note: The `emoji` parameter is required by the chat-sdk Adapter interface but
+   * is not used. The Zernio API removes all reactions from the authenticated sender
+   * regardless of which emoji is specified (both Telegram and WhatsApp work this way).
    */
   async removeReaction(
     threadId: string,
     messageId: string,
-    emoji: EmojiValue | string,
+    _emoji: EmojiValue | string,
   ): Promise<void> {
     const { accountId, conversationId } = this.decodeThreadId(threadId);
     await this.api.removeReaction(conversationId, messageId, accountId);
@@ -576,7 +586,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
         try {
           await this.api.editMessage(conversationId, messageId, {
             accountId,
-            message: buffer,
+            text: buffer,
           });
           lastEditTime = now;
         } catch {
@@ -589,7 +599,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     try {
       await this.api.editMessage(conversationId, messageId, {
         accountId,
-        message: buffer,
+        text: buffer,
       });
     } catch {
       // If edit fails, the last successful edit or initial post is the final state

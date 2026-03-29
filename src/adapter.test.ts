@@ -366,25 +366,121 @@ describe("handleWebhook", () => {
   });
 });
 
-// ─── Unsupported Method Tests ───────────────────────────────────────────────
+// ─── API-Backed Method Tests ────────────────────────────────────────────────
 
-describe("unsupported methods", () => {
-  const adapter = new ZernioAdapter(TEST_CONFIG);
+describe("API-backed methods", () => {
+  let adapter: ZernioAdapter;
 
-  it("deleteMessage throws AdapterError", async () => {
-    await expect(adapter.deleteMessage("zernio:a:b", "msg-1")).rejects.toThrow(AdapterError);
+  beforeEach(() => {
+    adapter = new ZernioAdapter(TEST_CONFIG);
+    adapter.initialize({
+      getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+      processMessage: vi.fn(),
+    } as any);
   });
 
-  it("addReaction throws AdapterError", async () => {
-    await expect(adapter.addReaction("zernio:a:b", "msg-1", "thumbsup")).rejects.toThrow(AdapterError);
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("removeReaction throws AdapterError", async () => {
-    await expect(adapter.removeReaction("zernio:a:b", "msg-1", "thumbsup")).rejects.toThrow(AdapterError);
+  it("deleteMessage calls the API DELETE endpoint", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    await adapter.deleteMessage("zernio:acc-1:conv-2", "msg-3");
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/inbox/conversations/conv-2/messages/msg-3"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
-  it("startTyping is a no-op (does not throw)", async () => {
-    await expect(adapter.startTyping("zernio:a:b")).resolves.toBeUndefined();
+  it("addReaction calls the API POST endpoint with emoji", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    await adapter.addReaction("zernio:acc-1:conv-2", "msg-3", "👍");
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.emoji).toBe("👍");
+    expect(body.accountId).toBe("acc-1");
+  });
+
+  it("removeReaction calls the API DELETE endpoint", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    await adapter.removeReaction("zernio:acc-1:conv-2", "msg-3", "👍");
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/inbox/conversations/conv-2/messages/msg-3/reactions"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("startTyping calls the API and does not throw", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    await expect(adapter.startTyping("zernio:acc-1:conv-2")).resolves.toBeUndefined();
+  });
+
+  it("startTyping silently swallows errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network down"));
+    await expect(adapter.startTyping("zernio:acc-1:conv-2")).resolves.toBeUndefined();
+  });
+
+  it("postMessage sends text via API", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: { messageId: "m1" } }), { status: 200 }),
+    );
+    const result = await adapter.postMessage("zernio:acc-1:conv-2", "Hello!");
+    expect(result.id).toBe("m1");
+    expect(result.threadId).toBe("zernio:acc-1:conv-2");
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.message).toBe("Hello!");
+    expect(body.accountId).toBe("acc-1");
+  });
+
+  it("editMessage sends text field (not message) to API", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, data: { messageId: 42 } }), { status: 200 }),
+    );
+    await adapter.editMessage("zernio:acc-1:conv-2", "42", "Updated text");
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.text).toBe("Updated text");
+    expect(body.message).toBeUndefined();
+  });
+
+  it("fetchMessages returns parsed messages", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        status: "success",
+        messages: [makeRawMessage()],
+        lastUpdated: "2026-03-29T10:00:00Z",
+      }), { status: 200 }),
+    );
+    const result = await adapter.fetchMessages("zernio:acc-1:conv-2");
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].text).toBe("Hello from Instagram");
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  it("fetchThread returns thread info with metadata", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        data: {
+          id: "conv-2",
+          accountId: "acc-1",
+          platform: "telegram",
+          status: "active",
+          participantName: "Jane",
+          participantUsername: "janedoe",
+        },
+      }), { status: 200 }),
+    );
+    const result = await adapter.fetchThread("zernio:acc-1:conv-2");
+    expect(result.id).toBe("zernio:acc-1:conv-2");
+    expect(result.channelId).toBe("acc-1");
+    expect(result.isDM).toBe(true);
+    expect(result.metadata.platform).toBe("telegram");
   });
 });
 

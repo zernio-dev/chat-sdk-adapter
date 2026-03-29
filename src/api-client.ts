@@ -59,7 +59,7 @@ export class ZernioApiClient {
   async editMessage(
     conversationId: string,
     messageId: string,
-    body: { accountId: string; message?: string; replyMarkup?: unknown },
+    body: { accountId: string; text?: string; replyMarkup?: unknown },
   ): Promise<Record<string, unknown>> {
     const result = await this.request<{ success: boolean; data: Record<string, unknown> }>(
       "PATCH",
