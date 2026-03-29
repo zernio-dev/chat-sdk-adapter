@@ -7,7 +7,7 @@
  * Environment variables:
  * - ZERNIO_API_KEY: API key for Zernio REST API calls (required)
  * - ZERNIO_WEBHOOK_SECRET: HMAC-SHA256 secret for webhook verification (recommended)
- * - ZERNIO_API_BASE_URL: Override the API base URL (default: https://api.zernio.com)
+ * - ZERNIO_API_BASE_URL: Override the API base URL (default: https://zernio.com/api)
  * - ZERNIO_BOT_NAME: Bot display name (default: "Zernio Bot")
  */
 
@@ -53,7 +53,7 @@ export function createZernioAdapter(
   return new ZernioAdapter({
     apiKey,
     webhookSecret: config?.webhookSecret ?? process.env.ZERNIO_WEBHOOK_SECRET,
-    baseUrl: config?.baseUrl ?? process.env.ZERNIO_API_BASE_URL ?? "https://api.zernio.com",
+    baseUrl: config?.baseUrl ?? process.env.ZERNIO_API_BASE_URL ?? "https://zernio.com/api",
     botName: config?.botName ?? process.env.ZERNIO_BOT_NAME ?? "Zernio Bot",
     logger: config?.logger,
   });

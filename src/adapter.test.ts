@@ -10,7 +10,7 @@ import type { ZernioRawMessage, ZernioWebhookPayload } from "./types.js";
 const TEST_CONFIG = {
   apiKey: "test-api-key",
   webhookSecret: "test-secret",
-  baseUrl: "https://api.zernio.com",
+  baseUrl: "https://zernio.com/api",
   botName: "Test Bot",
 };
 

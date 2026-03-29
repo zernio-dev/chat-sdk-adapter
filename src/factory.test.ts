@@ -61,7 +61,7 @@ describe("createZernioAdapter", () => {
     expect(adapter.userName).toBe("Zernio Bot");
   });
 
-  it("defaults baseUrl to https://api.zernio.com", () => {
+  it("defaults baseUrl to https://zernio.com/api", () => {
     delete process.env.ZERNIO_API_BASE_URL;
 
     // Just verify it doesn't throw (baseUrl is private, can't inspect directly)

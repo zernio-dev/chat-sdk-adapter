@@ -10,7 +10,7 @@ import { ZernioApiClient } from "./api-client.js";
 
 describe("ZernioApiClient", () => {
   let client: ZernioApiClient;
-  const baseUrl = "https://api.zernio.com";
+  const baseUrl = "https://zernio.com/api";
   const apiKey = "test-api-key";
 
   beforeEach(() => {
@@ -216,7 +216,7 @@ describe("ZernioApiClient", () => {
 
   describe("URL handling", () => {
     it("strips trailing slash from baseUrl", async () => {
-      const clientWithSlash = new ZernioApiClient(apiKey, "https://api.zernio.com/");
+      const clientWithSlash = new ZernioApiClient(apiKey, "https://zernio.com/api/");
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(JSON.stringify({ status: "success", messages: [], lastUpdated: "" }), { status: 200 }),
       );

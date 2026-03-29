@@ -76,7 +76,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     this.config = {
       apiKey: config.apiKey,
       webhookSecret: config.webhookSecret ?? "",
-      baseUrl: config.baseUrl ?? "https://api.zernio.com",
+      baseUrl: config.baseUrl ?? "https://zernio.com/api",
       botName: config.botName ?? "Zernio Bot",
     };
     this.userName = this.config.botName;

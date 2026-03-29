@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 |----------|----------|-------------|
 | `ZERNIO_API_KEY` | Yes | Your Zernio API key for sending messages |
 | `ZERNIO_WEBHOOK_SECRET` | Recommended | HMAC-SHA256 secret for verifying inbound webhooks |
-| `ZERNIO_API_BASE_URL` | No | Override API base URL (default: `https://api.zernio.com`) |
+| `ZERNIO_API_BASE_URL` | No | Override API base URL (default: `https://zernio.com/api`) |
 | `ZERNIO_BOT_NAME` | No | Bot display name (default: `"Zernio Bot"`) |
 
 ### Explicit Configuration
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 const adapter = createZernioAdapter({
   apiKey: "your-api-key",
   webhookSecret: "your-webhook-secret",
-  baseUrl: "https://api.zernio.com",
+  baseUrl: "https://zernio.com/api",
   botName: "My Bot",
 });
 ```
@@ -221,7 +221,7 @@ The adapter exports a standalone API client for direct Zernio API calls:
 ```typescript
 import { ZernioApiClient } from "@zernio/chat-sdk-adapter";
 
-const client = new ZernioApiClient("your-api-key", "https://api.zernio.com");
+const client = new ZernioApiClient("your-api-key", "https://zernio.com/api");
 
 // List conversations
 const { data, pagination } = await client.listConversations({

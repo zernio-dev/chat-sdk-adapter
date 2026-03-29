@@ -15,7 +15,7 @@ export interface ZernioConfig {
   /** HMAC-SHA256 secret for verifying inbound webhook signatures. Optional but strongly recommended. */
   webhookSecret?: string;
 
-  /** Base URL for the Zernio API. Defaults to "https://api.zernio.com". */
+  /** Base URL for the Zernio API. Defaults to "https://zernio.com/api". */
   baseUrl?: string;
 
   /** Display name for the bot in chat-sdk. Defaults to "Zernio Bot". */
