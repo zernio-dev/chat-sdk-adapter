@@ -76,7 +76,7 @@ Connect the social accounts you want your bot to handle through the Zernio dashb
 Create a webhook in your Zernio dashboard pointing to your bot's webhook endpoint:
 
 - **URL**: `https://your-app.com/api/chat-webhook`
-- **Events**: Select `message.received`
+- **Events**: Select `message.received` and `comment.received`
 - **Secret**: Set a strong secret and pass it as `ZERNIO_WEBHOOK_SECRET`
 
 ### 4. Enable the Inbox Addon
@@ -106,6 +106,7 @@ Thread IDs follow the format `zernio:{accountId}:{conversationId}`:
 
 - `accountId`: The Zernio social account ID (which platform account received the message)
 - `conversationId`: The Zernio conversation ID (the specific DM thread)
+- For comments: `zernio:{accountId}:comment:{postId}`
 
 ```typescript
 import { ZernioAdapter } from "@zernio/chat-sdk-adapter";
@@ -120,16 +121,74 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 | Feature | Supported | Notes |
 |---------|-----------|-------|
 | Send messages | Yes | Text messages across all platforms |
-| Edit messages | Partial | Telegram only (API constraint) |
-| Delete messages | No | Not exposed by Zernio API |
-| Reactions | No | Not exposed by Zernio API |
-| Typing indicators | No | Not exposed by Zernio API |
+| Rich messages (cards) | Yes | Buttons and templates on FB, IG, Telegram, WhatsApp |
+| Edit messages | Partial | Telegram only |
+| Delete messages | Partial | Telegram, X (full delete); Bluesky, Reddit (self-only) |
+| Reactions | Partial | Telegram and WhatsApp (add/remove emoji) |
+| Typing indicators | Partial | Facebook Messenger and Telegram |
+| AI streaming | Partial | Post+edit on Telegram; single post on others |
+| File attachments | Yes | Via media upload endpoint |
 | Fetch messages | Yes | Full conversation history |
 | Fetch thread info | Yes | Participant details, platform, status |
 | Webhook verification | Yes | HMAC-SHA256 signature |
-| File attachments | Yes | Via `attachmentUrl` in message body |
-| Cards/Rich messages | Partial | Rendered as fallback text |
-| Streaming | No | REST-based API |
+| Comment webhooks | Yes | `comment.received` routed through handlers |
+
+### Platform Support Matrix
+
+| Feature | FB | IG | Telegram | WhatsApp | X | Bluesky | Reddit |
+|---------|----|----|----------|----------|---|---------|--------|
+| Send text | Y | Y | Y | Y | Y | Y | Y |
+| Buttons | Y | Y | Y | Y | - | - | - |
+| Typing | Y | - | Y | - | - | - | - |
+| Delete | - | - | Y | - | Y | Self | Self |
+| Reactions | - | - | Y | Y | - | - | - |
+| Media | Y | Y | Y | Y | Y | - | - |
+| Edit | - | - | Y | - | - | - | - |
+
+## Rich Messages
+
+The adapter maps chat-sdk `Card` elements to native platform formats instead of rendering as fallback text:
+
+```typescript
+import { Card, Button, Actions, Text } from "chat";
+
+await thread.post(
+  Card({
+    title: "Order #1234",
+    subtitle: "Total: $50.00",
+    imageUrl: "https://example.com/product.jpg",
+    children: [
+      Text("Your order is ready for pickup."),
+      Actions([
+        Button({ id: "confirm", label: "Confirm", style: "primary" }),
+        LinkButton({ label: "Track Order", url: "https://example.com/track" }),
+      ]),
+    ],
+  })
+);
+// Renders as interactive card on FB/IG/Telegram/WhatsApp
+// Falls back to text on X/Bluesky/Reddit
+```
+
+## AI Streaming
+
+Stream AI responses with the post+edit pattern (works best on Telegram):
+
+```typescript
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+
+onNewMessage: async ({ thread, message }) => {
+  const result = await generateText({
+    model: openai("gpt-4o"),
+    prompt: message.text,
+  });
+
+  // On Telegram: posts initial message, edits as tokens arrive
+  // On other platforms: collects full response, posts once
+  await thread.stream(result.textStream);
+}
+```
 
 ## Platform-Specific Data
 
@@ -173,6 +232,15 @@ const { data, pagination } = await client.listConversations({
 
 // Fetch messages
 const messages = await client.fetchMessages(conversationId, accountId);
+
+// Send typing indicator
+await client.sendTyping(conversationId, accountId);
+
+// Add reaction
+await client.addReaction(conversationId, messageId, accountId, "👍");
+
+// Upload media
+const { url } = await client.uploadMedia(fileBuffer, "image/jpeg");
 ```
 
 ## Webhook Verification
