@@ -3,6 +3,9 @@
   "version": "0.2.3",
   "description": "Official Zernio adapter for Chat SDK — build chatbots across Instagram, Facebook, Twitter/X, Telegram, WhatsApp, Bluesky, and Reddit through a single integration",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
