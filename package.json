@@ -1,0 +1,63 @@
+{
+  "name": "@zernio/chat-sdk-adapter",
+  "version": "0.1.0",
+  "description": "Official Zernio adapter for Chat SDK — build chatbots across Instagram, Facebook, Twitter/X, Telegram, WhatsApp, Bluesky, and Reddit through a single integration",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "chat-sdk",
+    "chat-adapter",
+    "zernio",
+    "social-media",
+    "chatbot",
+    "instagram",
+    "facebook",
+    "telegram",
+    "whatsapp",
+    "twitter",
+    "bluesky"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "chat": "^4.0.0"
+  },
+  "dependencies": {
+    "@chat-adapter/shared": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "chat": "^4.23.0",
+    "@chat-adapter/shared": "^4.23.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zernio-dev/chat-sdk-adapter"
+  },
+  "homepage": "https://zernio.com",
+  "author": "Zernio <hello@zernio.com>"
+}
