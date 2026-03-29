@@ -2,7 +2,7 @@
 
 Official [Zernio](https://zernio.com) adapter for [Chat SDK](https://chat-sdk.dev). Build chatbots that work across **Instagram, Facebook, Twitter/X, Telegram, WhatsApp, Bluesky, and Reddit** through a single integration.
 
-Instead of configuring seven separate platform adapters, one Zernio adapter covers every messaging platform Zernio supports.
+Even with native Chat SDK adapters for each platform, you'd still need to apply to Meta's developer program, go through App Review, get WhatsApp Business verification, apply for X elevated access, and more. With Zernio, your users connect accounts in a dashboard and you get one API key. No developer programs, no app reviews, no token management.
 
 ## Installation
 
