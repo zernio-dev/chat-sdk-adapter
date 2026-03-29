@@ -125,6 +125,123 @@ export class ZernioApiClient {
     );
   }
 
+  // ─── Typing ─────────────────────────────────────────────────────────────
+
+  /**
+   * Send a typing indicator for a conversation.
+   * POST /v1/inbox/conversations/{conversationId}/typing
+   *
+   * Supported on Facebook Messenger and Telegram. No-op on other platforms.
+   */
+  async sendTyping(conversationId: string, accountId: string): Promise<void> {
+    await this.request<{ success: boolean }>(
+      "POST",
+      `/v1/inbox/conversations/${conversationId}/typing`,
+      { accountId },
+    );
+  }
+
+  // ─── Delete ─────────────────────────────────────────────────────────────
+
+  /**
+   * Delete a message from a conversation.
+   * DELETE /v1/inbox/conversations/{conversationId}/messages/{messageId}
+   *
+   * Supported on Telegram, X/Twitter. Self-only delete on Bluesky, Reddit.
+   */
+  async deleteMessage(
+    conversationId: string,
+    messageId: string,
+    accountId: string,
+  ): Promise<void> {
+    await this.request<{ success: boolean }>(
+      "DELETE",
+      `/v1/inbox/conversations/${conversationId}/messages/${messageId}?accountId=${encodeURIComponent(accountId)}`,
+    );
+  }
+
+  // ─── Reactions ──────────────────────────────────────────────────────────
+
+  /**
+   * Add a reaction to a message.
+   * POST /v1/inbox/conversations/{conversationId}/messages/{messageId}/reactions
+   *
+   * Supported on Telegram and WhatsApp.
+   */
+  async addReaction(
+    conversationId: string,
+    messageId: string,
+    accountId: string,
+    emoji: string,
+  ): Promise<void> {
+    await this.request<{ success: boolean }>(
+      "POST",
+      `/v1/inbox/conversations/${conversationId}/messages/${messageId}/reactions`,
+      { accountId, emoji },
+    );
+  }
+
+  /**
+   * Remove a reaction from a message.
+   * DELETE /v1/inbox/conversations/{conversationId}/messages/{messageId}/reactions
+   */
+  async removeReaction(
+    conversationId: string,
+    messageId: string,
+    accountId: string,
+  ): Promise<void> {
+    await this.request<{ success: boolean }>(
+      "DELETE",
+      `/v1/inbox/conversations/${conversationId}/messages/${messageId}/reactions?accountId=${encodeURIComponent(accountId)}`,
+    );
+  }
+
+  // ─── Media Upload ───────────────────────────────────────────────────────
+
+  /**
+   * Upload media (image, video, file) and get back a URL.
+   * POST /v1/media/upload
+   *
+   * Used by the adapter to convert chat-sdk FileUpload buffers into URLs
+   * that can be passed as attachmentUrl when sending messages.
+   */
+  async uploadMedia(
+    data: Buffer | ArrayBuffer | Blob,
+    mimeType?: string,
+  ): Promise<{ url: string; mediaId?: string }> {
+    const url = `${this.baseUrl}/v1/media/upload-direct`;
+    const formData = new FormData();
+
+    // Convert Buffer/ArrayBuffer to Blob for FormData
+    const blob = data instanceof Blob
+      ? data
+      : new Blob([data], { type: mimeType || "application/octet-stream" });
+    formData.append("file", blob, `upload.${mimeType?.split("/")[1] || "bin"}`);
+    if (mimeType) formData.append("contentType", mimeType);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        body: formData,
+      });
+    } catch (error) {
+      throw new NetworkError(
+        ADAPTER_NAME,
+        "Media upload request failed",
+        error instanceof Error ? error : undefined,
+      );
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      throw new NetworkError(ADAPTER_NAME, `Media upload failed: ${errorBody}`);
+    }
+
+    return response.json() as Promise<{ url: string; mediaId?: string }>;
+  }
+
   /**
    * Internal HTTP request helper.
    * Handles auth headers, JSON serialization, and error mapping.

@@ -34,12 +34,14 @@ import {
 } from "@chat-adapter/shared";
 import { ZernioApiClient } from "./api-client.js";
 import { ZernioFormatConverter } from "./format-converter.js";
+import { mapCardToZernioMessage } from "./card-mapper.js";
 import { verifyWebhookSignature, extractWebhookHeaders } from "./webhook.js";
 import type {
   ZernioConfig,
   ZernioRawMessage,
   ZernioThreadId,
   ZernioWebhookPayload,
+  ZernioCommentWebhookPayload,
 } from "./types.js";
 
 /** Prefix used in all Zernio thread IDs. */
@@ -125,17 +127,11 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     }
 
     // Parse the webhook payload
-    let payload: ZernioWebhookPayload;
+    let payload: Record<string, any>;
     try {
       payload = JSON.parse(rawBody);
     } catch {
       return new Response("Invalid JSON", { status: 400 });
-    }
-
-    // Only process incoming message.received events
-    // Skip outgoing messages to prevent infinite loops (bot's own replies echoed back)
-    if (payload.event !== "message.received" || payload.message.direction !== "incoming") {
-      return new Response("OK", { status: 200 });
     }
 
     if (!this.chat) {
@@ -143,21 +139,82 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
       return new Response("Adapter not initialized", { status: 500 });
     }
 
-    // Encode the thread ID from the webhook's account and conversation data
+    // Route based on event type
+    if (payload.event === "message.received") {
+      return this.handleMessageReceived(payload as ZernioWebhookPayload, options);
+    }
+
+    if (payload.event === "comment.received") {
+      return this.handleCommentReceived(payload as ZernioCommentWebhookPayload, options);
+    }
+
+    // Unhandled event type, acknowledge receipt
+    return new Response("OK", { status: 200 });
+  }
+
+  /**
+   * Handle a message.received webhook event.
+   * Filters out outgoing messages to prevent echo loops.
+   */
+  private handleMessageReceived(
+    payload: ZernioWebhookPayload,
+    options?: WebhookOptions,
+  ): Response {
+    // Skip outgoing messages to prevent infinite loops (bot's own replies echoed back)
+    if (payload.message.direction !== "incoming") {
+      return new Response("OK", { status: 200 });
+    }
+
     const threadId = this.encodeThreadId({
       accountId: payload.account.id,
       conversationId: payload.message.conversationId,
     });
 
-    // Use a lazy async factory function (only called if message isn't deduplicated)
     const factory = async (): Promise<Message<ZernioRawMessage>> => {
       return this.parseMessage(payload.message);
     };
 
-    // processMessage handles waitUntil registration internally
-    this.chat.processMessage(this, threadId, factory, options);
+    this.chat!.processMessage(this, threadId, factory, options);
+    return new Response("OK", { status: 200 });
+  }
 
-    // Return a fast 200 to acknowledge receipt
+  /**
+   * Handle a comment.received webhook event.
+   * Routes post comments through chat-sdk handlers using a comment-specific thread ID.
+   * Thread ID format: "zernio:{accountId}:comment:{postId}"
+   */
+  private handleCommentReceived(
+    payload: ZernioCommentWebhookPayload,
+    options?: WebhookOptions,
+  ): Response {
+    const threadId = this.encodeThreadId({
+      accountId: payload.account.id,
+      conversationId: `comment:${payload.comment.postId}`,
+    });
+
+    const factory = async (): Promise<Message<ZernioRawMessage>> => {
+      // Map comment data to a ZernioRawMessage-compatible shape
+      const syntheticMessage: ZernioRawMessage = {
+        id: payload.comment.id,
+        conversationId: `comment:${payload.comment.postId}`,
+        platform: payload.comment.platform,
+        platformMessageId: payload.comment.id,
+        direction: "incoming",
+        text: payload.comment.text,
+        attachments: [],
+        sender: {
+          id: payload.comment.author.id,
+          name: payload.comment.author.name,
+          username: payload.comment.author.username,
+          picture: payload.comment.author.picture,
+        },
+        sentAt: payload.comment.createdAt,
+        isRead: false,
+      };
+      return this.parseMessage(syntheticMessage);
+    };
+
+    this.chat!.processMessage(this, threadId, factory, options);
     return new Response("OK", { status: 200 });
   }
 
@@ -236,9 +293,11 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
   /**
    * Send a message to a Zernio conversation.
    *
-   * Uses the format converter's renderPostable() to handle all message types
-   * (string, markdown, AST, cards). Extracts file attachments via extractFiles()
-   * and sends them as attachment URLs.
+   * Handles all AdapterPostableMessage types:
+   * - Cards: mapped to Zernio buttons/templates via card-mapper (renders natively
+   *   on Facebook, Instagram, Telegram, WhatsApp; falls back to text on others)
+   * - Markdown/AST/string: rendered via format converter
+   * - Files: uploaded via media upload endpoint if available, otherwise warns
    */
   async postMessage(
     threadId: string,
@@ -250,29 +309,66 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     const card = extractCard(message);
     const files = extractFiles(message);
 
-    // Render text content using the format converter
-    const text = card
-      ? cardToFallbackText(card)
-      : this.converter.renderPostable(message);
+    // Build the send body based on message type
+    const body: Record<string, unknown> = { accountId };
 
-    // Log a warning if files are attached (Zernio API requires URLs, not raw buffers)
-    // File attachments via chat-sdk use Buffer data; consumers should use attachmentUrl
-    // directly through the ZernioApiClient for file sending.
+    if (card) {
+      // Map card to native Zernio rich message format (buttons, templates)
+      const mapped = mapCardToZernioMessage(card as any);
+      body.message = mapped.message || undefined;
+      if (mapped.buttons) body.buttons = mapped.buttons;
+      if (mapped.template) body.template = mapped.template;
+    } else {
+      // Plain text / markdown / AST
+      body.message = this.converter.renderPostable(message) || undefined;
+    }
+
+    // Handle file uploads: try media upload endpoint, fall back to warning
     if (files.length > 0) {
-      this.logger.warn(
-        "File attachments via chat-sdk use binary data which cannot be sent through the Zernio REST API. " +
-        "Use the ZernioApiClient directly with attachmentUrl for file sending.",
-      );
+      try {
+        const uploaded = await this.api.uploadMedia(files[0].data, files[0].mimeType);
+        body.attachmentUrl = uploaded.url;
+        body.attachmentType = files[0].mimeType?.startsWith("image/")
+          ? "image"
+          : files[0].mimeType?.startsWith("video/")
+            ? "video"
+            : files[0].mimeType?.startsWith("audio/")
+              ? "audio"
+              : "file";
+      } catch {
+        this.logger.warn(
+          "File upload failed. The /v1/media/upload endpoint may not be available yet. " +
+          "Use the ZernioApiClient directly with attachmentUrl for file sending.",
+        );
+      }
     }
 
     // Send the message
-    const result = await this.api.sendMessage(conversationId, {
-      accountId,
-      message: text || undefined,
-    });
+    const result = await this.api.sendMessage(conversationId, body as any);
     const messageId = (result.messageId as string) ?? (result.id as string) ?? "";
 
+    // Send additional file attachments as separate messages (one per request)
+    for (let i = 1; i < files.length; i++) {
+      try {
+        const uploaded = await this.api.uploadMedia(files[i].data, files[i].mimeType);
+        await this.api.sendMessage(conversationId, {
+          accountId,
+          attachmentUrl: uploaded.url,
+          attachmentType: files[i].mimeType?.startsWith("image/")
+            ? "image"
+            : files[i].mimeType?.startsWith("video/")
+              ? "video"
+              : files[i].mimeType?.startsWith("audio/")
+                ? "audio"
+                : "file",
+        });
+      } catch {
+        // Skip failed uploads for additional attachments
+      }
+    }
+
     // Return a synthetic RawMessage since the Zernio API doesn't return the full message object
+    const sentText = (body.message as string) ?? "";
     return {
       id: messageId,
       threadId,
@@ -282,7 +378,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
         platform: "",
         platformMessageId: "",
         direction: "outgoing",
-        text,
+        text: sentText,
         attachments: [],
         sender: { id: "bot" },
         sentAt: new Date().toISOString(),
@@ -330,34 +426,45 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
   }
 
   /**
-   * Delete a message. Not supported by the Zernio API.
+   * Delete a message from a conversation.
+   * Supported on: Telegram (full delete), X/Twitter (full delete),
+   * Bluesky and Reddit (delete for self only).
+   * Unsupported on: Facebook, Instagram, WhatsApp (API returns 400).
    */
-  async deleteMessage(_threadId: string, _messageId: string): Promise<void> {
-    throw new AdapterError("Message deletion is not supported by the Zernio API", "zernio");
+  async deleteMessage(threadId: string, messageId: string): Promise<void> {
+    const { accountId, conversationId } = this.decodeThreadId(threadId);
+    await this.api.deleteMessage(conversationId, messageId, accountId);
   }
 
   // ─── Reactions ────────────────────────────────────────────────────────────
 
   /**
-   * Add a reaction to a message. Not supported by the Zernio API.
+   * Add a reaction to a message.
+   * Supported on: Telegram (emoji reactions), WhatsApp (emoji reactions).
+   * Unsupported on other platforms (API returns 400).
    */
   async addReaction(
-    _threadId: string,
-    _messageId: string,
-    _emoji: EmojiValue | string,
+    threadId: string,
+    messageId: string,
+    emoji: EmojiValue | string,
   ): Promise<void> {
-    throw new AdapterError("Reactions are not supported by the Zernio API", "zernio");
+    const { accountId, conversationId } = this.decodeThreadId(threadId);
+    const emojiStr = typeof emoji === "string" ? emoji : emoji.name;
+    await this.api.addReaction(conversationId, messageId, accountId, emojiStr);
   }
 
   /**
-   * Remove a reaction from a message. Not supported by the Zernio API.
+   * Remove a reaction from a message.
+   * Supported on: Telegram (send empty reaction), WhatsApp (send empty emoji).
+   * Unsupported on other platforms (API returns 400).
    */
   async removeReaction(
-    _threadId: string,
-    _messageId: string,
-    _emoji: EmojiValue | string,
+    threadId: string,
+    messageId: string,
+    emoji: EmojiValue | string,
   ): Promise<void> {
-    throw new AdapterError("Reactions are not supported by the Zernio API", "zernio");
+    const { accountId, conversationId } = this.decodeThreadId(threadId);
+    await this.api.removeReaction(conversationId, messageId, accountId);
   }
 
   // ─── Fetching ─────────────────────────────────────────────────────────────
@@ -409,10 +516,101 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
   // ─── Typing ───────────────────────────────────────────────────────────────
 
   /**
-   * Show a typing indicator. Not supported by the Zernio API (no-op).
+   * Show a typing indicator.
+   * Supported on: Facebook Messenger (sender_action), Telegram (sendChatAction).
+   * No-op on platforms without typing indicator support.
    */
-  async startTyping(_threadId: string, _status?: string): Promise<void> {
-    // No-op: Zernio API doesn't expose typing indicators
+  async startTyping(threadId: string, _status?: string): Promise<void> {
+    const { accountId, conversationId } = this.decodeThreadId(threadId);
+    try {
+      await this.api.sendTyping(conversationId, accountId);
+    } catch {
+      // Silently ignore errors (typing indicators are best-effort)
+    }
+  }
+
+  // ─── Streaming ──────────────────────────────────────────────────────────
+
+  /**
+   * Stream AI responses using post-then-edit pattern.
+   * Posts an initial message, then edits it as tokens arrive.
+   *
+   * Works on Telegram (supports message editing). On other platforms,
+   * collects the full stream and posts once since editing isn't supported.
+   */
+  async stream(
+    threadId: string,
+    textStream: AsyncIterable<string | import("chat").StreamChunk>,
+    options?: import("chat").StreamOptions,
+  ): Promise<RawMessage<ZernioRawMessage>> {
+    const { accountId, conversationId } = this.decodeThreadId(threadId);
+
+    // Helper to extract text from a chunk (string or StreamChunk)
+    const chunkToText = (chunk: string | import("chat").StreamChunk): string => {
+      if (typeof chunk === "string") return chunk;
+      if (chunk.type === "markdown_text") return chunk.text;
+      return "";
+    };
+
+    // Collect the first chunk to have initial content
+    let buffer = "";
+    const iterator = textStream[Symbol.asyncIterator]();
+    const first = await iterator.next();
+    if (!first.done) buffer = chunkToText(first.value);
+
+    // Post initial message
+    const result = await this.api.sendMessage(conversationId, {
+      accountId,
+      message: buffer || "...",
+    });
+    const messageId = (result.messageId as string) ?? (result.id as string) ?? "";
+
+    // Stream remaining chunks via edit (throttled to avoid rate limits)
+    let lastEditTime = 0;
+    const EDIT_INTERVAL_MS = 500;
+
+    for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
+      buffer += chunkToText(next.value);
+      const now = Date.now();
+      if (now - lastEditTime >= EDIT_INTERVAL_MS) {
+        try {
+          await this.api.editMessage(conversationId, messageId, {
+            accountId,
+            message: buffer,
+          });
+          lastEditTime = now;
+        } catch {
+          // Edit failed (platform doesn't support it), continue collecting
+        }
+      }
+    }
+
+    // Final edit with complete text
+    try {
+      await this.api.editMessage(conversationId, messageId, {
+        accountId,
+        message: buffer,
+      });
+    } catch {
+      // If edit fails, the last successful edit or initial post is the final state
+    }
+
+    return {
+      id: messageId,
+      threadId,
+      raw: {
+        id: messageId,
+        conversationId,
+        platform: "",
+        platformMessageId: "",
+        direction: "outgoing",
+        text: buffer,
+        attachments: [],
+        sender: { id: "bot" },
+        sentAt: new Date().toISOString(),
+        isRead: true,
+      },
+    };
   }
 
   // ─── Formatting ───────────────────────────────────────────────────────────

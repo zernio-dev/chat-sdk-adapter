@@ -113,6 +113,37 @@ export interface ZernioWebhookPayload {
   metadata?: ZernioWebhookMetadata;
 }
 
+/** Comment author from the comment.received webhook payload. */
+export interface ZernioCommentAuthor {
+  id: string;
+  username?: string;
+  name?: string;
+  picture?: string;
+}
+
+/** Comment data from the comment.received webhook payload. */
+export interface ZernioWebhookComment {
+  id: string;
+  postId: string;
+  platformPostId: string;
+  platform: string;
+  text: string;
+  author: ZernioCommentAuthor;
+  createdAt: string;
+  isReply: boolean;
+  parentCommentId: string | null;
+}
+
+/** Full comment.received webhook payload envelope. */
+export interface ZernioCommentWebhookPayload {
+  id: string;
+  event: "comment.received";
+  timestamp: string;
+  comment: ZernioWebhookComment;
+  post: { id: string; platformPostId: string };
+  account: { id: string; platform: string; username: string };
+}
+
 // ─── API Request/Response Types ─────────────────────────────────────────────
 
 /** Body for POST /v1/inbox/conversations/{conversationId}/messages. */

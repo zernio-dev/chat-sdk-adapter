@@ -28,6 +28,7 @@ export { createZernioAdapter } from "./factory.js";
 
 export { ZernioFormatConverter } from "./format-converter.js";
 export { ZernioApiClient } from "./api-client.js";
+export { mapCardToZernioMessage } from "./card-mapper.js";
 export { verifyWebhookSignature, extractWebhookHeaders } from "./webhook.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -46,4 +47,9 @@ export type {
   ZernioConversation,
   ZernioMessageListResponse,
   ZernioConversationListResponse,
+  ZernioCommentWebhookPayload,
+  ZernioCommentAuthor,
+  ZernioWebhookComment,
 } from "./types.js";
+
+export type { CardMappingResult } from "./card-mapper.js";

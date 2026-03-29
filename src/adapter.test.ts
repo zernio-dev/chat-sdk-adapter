@@ -280,10 +280,47 @@ describe("handleWebhook", () => {
     expect(mockChat.processMessage).not.toHaveBeenCalled();
   });
 
-  it("skips non message.received events", async () => {
+  it("skips unhandled event types", async () => {
     const payload = {
       ...makeWebhookPayload(),
+      event: "post.published",
+    };
+    const body = JSON.stringify(payload);
+    const signature = signPayload(body);
+
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "X-Late-Signature": signature,
+        "X-Late-Event": "post.published",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    const response = await adapter.handleWebhook(request);
+    expect(response.status).toBe(200);
+    expect(mockChat.processMessage).not.toHaveBeenCalled();
+  });
+
+  it("processes comment.received events", async () => {
+    const payload = {
+      id: "evt-002",
       event: "comment.received",
+      timestamp: "2026-03-29T10:00:00.000Z",
+      comment: {
+        id: "cmt-001",
+        postId: "post-123",
+        platformPostId: "ig-post-123",
+        platform: "instagram",
+        text: "Great post!",
+        author: { id: "user-002", username: "commenter", name: "Commenter" },
+        createdAt: "2026-03-29T10:00:00.000Z",
+        isReply: false,
+        parentCommentId: null,
+      },
+      post: { id: "post-123", platformPostId: "ig-post-123" },
+      account: { id: "acc-789", platform: "instagram", username: "mybrand" },
     };
     const body = JSON.stringify(payload);
     const signature = signPayload(body);
@@ -300,7 +337,10 @@ describe("handleWebhook", () => {
 
     const response = await adapter.handleWebhook(request);
     expect(response.status).toBe(200);
-    expect(mockChat.processMessage).not.toHaveBeenCalled();
+    expect(mockChat.processMessage).toHaveBeenCalledOnce();
+
+    const [, threadIdArg] = mockChat.processMessage.mock.calls[0];
+    expect(threadIdArg).toBe("zernio:acc-789:comment:post-123");
   });
 
   it("skips signature verification when no webhookSecret is configured", async () => {
