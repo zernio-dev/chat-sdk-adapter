@@ -203,8 +203,8 @@ describe("handleWebhook", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": "invalid-hex-signature",
-        "X-Late-Event": "message.received",
+        "X-Zernio-Signature": "invalid-hex-signature",
+        "X-Zernio-Event": "message.received",
         "Content-Type": "application/json",
       },
       body,
@@ -221,8 +221,8 @@ describe("handleWebhook", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": signature,
-        "X-Late-Event": "message.received",
+        "X-Zernio-Signature": signature,
+        "X-Zernio-Event": "message.received",
         "Content-Type": "application/json",
       },
       body,
@@ -240,8 +240,8 @@ describe("handleWebhook", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": signature,
-        "X-Late-Event": "message.received",
+        "X-Zernio-Signature": signature,
+        "X-Zernio-Event": "message.received",
         "Content-Type": "application/json",
       },
       body,
@@ -268,8 +268,8 @@ describe("handleWebhook", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": signature,
-        "X-Late-Event": "message.received",
+        "X-Zernio-Signature": signature,
+        "X-Zernio-Event": "message.received",
         "Content-Type": "application/json",
       },
       body,
@@ -291,8 +291,8 @@ describe("handleWebhook", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": signature,
-        "X-Late-Event": "post.published",
+        "X-Zernio-Signature": signature,
+        "X-Zernio-Event": "post.published",
         "Content-Type": "application/json",
       },
       body,
@@ -328,8 +328,8 @@ describe("handleWebhook", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": signature,
-        "X-Late-Event": "comment.received",
+        "X-Zernio-Signature": signature,
+        "X-Zernio-Event": "comment.received",
         "Content-Type": "application/json",
       },
       body,

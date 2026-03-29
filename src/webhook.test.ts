@@ -46,17 +46,44 @@ describe("verifyWebhookSignature", () => {
 });
 
 describe("extractWebhookHeaders", () => {
-  it("extracts signature and event headers", () => {
+  it("extracts new X-Zernio-* headers", () => {
     const request = new Request("https://example.com/webhook", {
       method: "POST",
       headers: {
-        "X-Late-Signature": "abc123",
-        "X-Late-Event": "message.received",
+        "X-Zernio-Signature": "abc123",
+        "X-Zernio-Event": "message.received",
       },
     });
     const { signature, event } = extractWebhookHeaders(request);
     expect(signature).toBe("abc123");
     expect(event).toBe("message.received");
+  });
+
+  it("falls back to legacy X-Late-* headers", () => {
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "X-Late-Signature": "legacy123",
+        "X-Late-Event": "message.received",
+      },
+    });
+    const { signature, event } = extractWebhookHeaders(request);
+    expect(signature).toBe("legacy123");
+    expect(event).toBe("message.received");
+  });
+
+  it("prefers X-Zernio-* over X-Late-* when both present", () => {
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "X-Zernio-Signature": "new",
+        "X-Late-Signature": "old",
+        "X-Zernio-Event": "message.received",
+        "X-Late-Event": "message.received",
+      },
+    });
+    const { signature } = extractWebhookHeaders(request);
+    expect(signature).toBe("new");
   });
 
   it("returns null for missing headers", () => {
