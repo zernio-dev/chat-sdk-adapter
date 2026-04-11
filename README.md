@@ -9,19 +9,23 @@ Even with native Chat SDK adapters for each platform, you'd still need to apply 
 ## Installation
 
 ```bash
-npm install @zernio/chat-sdk-adapter chat
+npm install @zernio/chat-sdk-adapter chat @chat-adapter/state-memory
 ```
+
+> For production, swap `@chat-adapter/state-memory` for a persistent state adapter like `@chat-adapter/state-redis` or `@chat-adapter/state-pg`. See [State Adapters](https://chat-sdk.dev/docs/state) for all options.
 
 ## Quick Start
 
 ```typescript
 import { Chat } from "chat";
 import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
+import { createMemoryState } from "@chat-adapter/state-memory";
 
 const bot = new Chat({
   adapters: {
     zernio: createZernioAdapter(),
   },
+  state: createMemoryState(),
   onNewMessage: async ({ thread, message }) => {
     // This handler fires for messages from ALL connected platforms
     const platform = message.raw.platform; // "instagram", "telegram", etc.
