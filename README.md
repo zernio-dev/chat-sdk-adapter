@@ -22,7 +22,7 @@ import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 
 const bot = new Chat({
-  userName: "my-bot",
+  userName: "support-bot",
   adapters: {
     zernio: createZernioAdapter(),
   },
