@@ -15,6 +15,7 @@ npm install @zernio/chat-sdk-adapter chat
 ## Quick Start
 
 ```typescript
+// lib/bot.ts
 import { Chat } from "chat";
 import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
 
@@ -28,18 +29,27 @@ const bot = new Chat({
     await thread.post(`Hello from ${platform}!`);
   },
 });
+
+// Initialize the bot — adapters are set up during connect().
+// This must be called before bot.webhooks is available.
+const botReady = bot.connect();
+
+export { bot, botReady };
 ```
 
 ### Next.js Webhook Route
 
 ```typescript
 // app/api/chat-webhook/route.ts
-import { bot } from "@/lib/bot";
+import { bot, botReady } from "@/lib/bot";
 
 export async function POST(request: Request) {
+  await botReady; // Ensure adapters are initialized before handling webhooks
   return bot.webhooks.zernio(request);
 }
 ```
+
+> **Note:** `bot.connect()` returns a promise that resolves once and is cached by Node's module system, so subsequent requests just get the already-resolved promise with no extra overhead.
 
 ## Configuration
 
