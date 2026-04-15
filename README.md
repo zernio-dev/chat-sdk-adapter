@@ -159,7 +159,7 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 The adapter maps chat-sdk `Card` elements to native platform formats instead of rendering as fallback text:
 
 ```typescript
-import { Card, Button, Actions, Text } from "chat";
+import { Card, Button, Actions, CardText, LinkButton } from "chat";
 
 await thread.post(
   Card({
@@ -167,7 +167,7 @@ await thread.post(
     subtitle: "Total: $50.00",
     imageUrl: "https://example.com/product.jpg",
     children: [
-      Text("Your order is ready for pickup."),
+      CardText("Your order is ready for pickup."),
       Actions([
         Button({ id: "confirm", label: "Confirm", style: "primary" }),
         LinkButton({ label: "Track Order", url: "https://example.com/track" }),
