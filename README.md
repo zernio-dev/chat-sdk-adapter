@@ -181,21 +181,21 @@ await thread.post(
 
 ## AI Streaming
 
-Stream AI responses with the post+edit pattern (works best on Telegram):
+Stream AI responses with the post+edit pattern (works best on Telegram). `thread.post()` accepts an `AsyncIterable<string>`, so you can pass the `textStream` from `streamText` directly:
 
 ```typescript
-import { generateText } from "ai";
+import { streamText } from "ai";
 import { openai } from "@ai-sdk/openai";
 
 bot.onNewMessage(/.*/, async (thread, message) => {
-  const result = await generateText({
+  const result = streamText({
     model: openai("gpt-4o"),
     prompt: message.text,
   });
 
   // On Telegram: posts initial message, edits as tokens arrive
   // On other platforms: collects full response, posts once
-  await thread.stream(result.textStream);
+  await thread.post(result.textStream);
 });
 ```
 
