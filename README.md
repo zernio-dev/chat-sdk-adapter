@@ -21,17 +21,19 @@ import { Chat } from "chat";
 import { createZernioAdapter } from "@zernio/chat-sdk-adapter";
 import { createMemoryState } from "@chat-adapter/state-memory";
 
-const bot = new Chat({
+export const bot = new Chat({
   userName: "pizza-bot",
   adapters: {
     zernio: createZernioAdapter(),
   },
   state: createMemoryState(),
-  onNewMessage: async ({ thread, message }) => {
-    // This handler fires for messages from ALL connected platforms
-    const platform = message.raw.platform; // "instagram", "telegram", etc.
-    await thread.post(`Hello from ${platform}!`);
-  },
+});
+
+// Register a handler. The pattern is a RegExp — use /.*/ to match every message.
+bot.onNewMessage(/.*/, async (thread, message) => {
+  // This handler fires for messages from ALL connected platforms
+  const platform = (message.raw as any).platform; // "instagram", "telegram", etc.
+  await thread.post(`Hello from ${platform}!`);
 });
 ```
 
@@ -185,7 +187,7 @@ Stream AI responses with the post+edit pattern (works best on Telegram):
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 
-onNewMessage: async ({ thread, message }) => {
+bot.onNewMessage(/.*/, async (thread, message) => {
   const result = await generateText({
     model: openai("gpt-4o"),
     prompt: message.text,
@@ -194,7 +196,7 @@ onNewMessage: async ({ thread, message }) => {
   // On Telegram: posts initial message, edits as tokens arrive
   // On other platforms: collects full response, posts once
   await thread.stream(result.textStream);
-}
+});
 ```
 
 ## Platform-Specific Data
@@ -202,8 +204,8 @@ onNewMessage: async ({ thread, message }) => {
 Access the underlying platform through the raw message:
 
 ```typescript
-onNewMessage: async ({ message }) => {
-  const raw = message.raw;
+bot.onNewMessage(/.*/, async (thread, message) => {
+  const raw = message.raw as any;
 
   // Check which platform the message came from
   console.log(raw.platform); // "instagram", "facebook", "telegram", etc.
@@ -218,7 +220,7 @@ onNewMessage: async ({ message }) => {
   if (raw.sender.phoneNumber) {
     console.log(`Phone: ${raw.sender.phoneNumber}`);
   }
-}
+});
 ```
 
 ## API Client
