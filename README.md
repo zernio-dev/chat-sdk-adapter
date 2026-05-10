@@ -134,7 +134,7 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 | Edit messages | Partial | Telegram only |
 | Delete messages | Partial | Telegram, X (full delete); Bluesky, Reddit (self-only) |
 | Reactions | Partial | Telegram and WhatsApp (add/remove emoji) |
-| Typing indicators | Partial | Facebook Messenger and Telegram |
+| Typing indicators | Partial | Facebook Messenger, Telegram, and WhatsApp (requires recent inbound message) |
 | AI streaming | Partial | Post+edit on Telegram; single post on others |
 | File attachments | Yes | Via media upload endpoint |
 | Fetch messages | Yes | Full conversation history |
@@ -148,7 +148,7 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 |---------|----|----|----------|----------|---|---------|--------|
 | Send text | Y | Y | Y | Y | Y | Y | Y |
 | Buttons | Y | Y | Y | Y | - | - | - |
-| Typing | Y | - | Y | - | - | - | - |
+| Typing | Y | - | Y | Y | - | - | - |
 | Delete | - | - | Y | - | Y | Self | Self |
 | Reactions | - | - | Y | Y | - | - | - |
 | Media | Y | Y | Y | Y | Y | - | - |
