@@ -133,11 +133,12 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 | Rich messages (cards) | Yes | Buttons and templates on FB, IG, Telegram, WhatsApp |
 | Edit messages | Partial | Telegram only |
 | Delete messages | Partial | Telegram, X (full delete); Bluesky, Reddit (self-only) |
-| Reactions | Partial | Telegram and WhatsApp (add/remove emoji) |
+| Send reactions | Partial | Telegram and WhatsApp (add/remove emoji) |
+| Receive reactions (`onReaction`) | Partial | WhatsApp, Telegram (via the `reaction.received` webhook) |
 | Typing indicators | Partial | Facebook Messenger, Telegram, and WhatsApp (requires recent inbound message) |
 | AI streaming | Partial | Post+edit on Telegram; single post on others |
 | File attachments | Yes | Via media upload endpoint |
-| Fetch messages | Yes | Full conversation history |
+| Fetch messages | Yes | Full conversation history (supports `limit`, `cursor`, `direction`) |
 | Fetch thread info | Yes | Participant details, platform, status |
 | Webhook verification | Yes | HMAC-SHA256 signature |
 | Comment webhooks | Yes | `comment.received` routed through handlers |
@@ -239,8 +240,11 @@ const { data, pagination } = await client.listConversations({
   limit: 20,
 });
 
-// Fetch messages
-const messages = await client.fetchMessages(conversationId, accountId);
+// Fetch messages (optionally paginated: limit, opaque cursor, sortOrder)
+const messages = await client.fetchMessages(conversationId, accountId, {
+  limit: 20,
+  sortOrder: "desc", // newest first; omit for oldest-first (default)
+});
 
 // Send typing indicator
 await client.sendTyping(conversationId, accountId);

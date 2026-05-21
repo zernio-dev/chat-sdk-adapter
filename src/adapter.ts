@@ -13,6 +13,7 @@
 import {
   ConsoleLogger,
   Message,
+  defaultEmojiResolver,
   type Adapter,
   type AdapterPostableMessage,
   type ChatInstance,
@@ -37,11 +38,14 @@ import { ZernioFormatConverter } from "./format-converter.js";
 import { mapCardToZernioMessage } from "./card-mapper.js";
 import { verifyWebhookSignature, extractWebhookHeaders } from "./webhook.js";
 import type {
+  ZernioAttachment,
   ZernioConfig,
   ZernioRawMessage,
+  ZernioRestMessage,
   ZernioThreadId,
   ZernioWebhookPayload,
   ZernioCommentWebhookPayload,
+  ZernioReactionWebhookPayload,
 } from "./types.js";
 
 /** Prefix used in all Zernio thread IDs. */
@@ -154,6 +158,10 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
       return this.handleCommentReceived(payload as ZernioCommentWebhookPayload, options);
     }
 
+    if (payload.event === "reaction.received") {
+      return this.handleReactionReceived(payload as ZernioReactionWebhookPayload, options);
+    }
+
     // Unhandled event type, acknowledge receipt
     return new Response("OK", { status: 200 });
   }
@@ -221,6 +229,53 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     };
 
     this.chat!.processMessage(this, threadId, factory, options);
+    return new Response("OK", { status: 200 });
+  }
+
+  /**
+   * Handle a reaction.received webhook event.
+   *
+   * Routes to chat-sdk's reaction dispatch (`onReaction`) instead of the message
+   * pipeline. Previously Zernio delivered reactions as message.received with the
+   * emoji as the text, so a 👍 looked like an inbound DM (GitHub issue: onReaction
+   * never fired). The raw platform emoji is normalized to an EmojiValue via the
+   * default resolver's unicode path (WhatsApp/Telegram reactions are unicode, the
+   * same shape as Google Chat / Discord).
+   */
+  private handleReactionReceived(
+    payload: ZernioReactionWebhookPayload,
+    options?: WebhookOptions,
+  ): Response {
+    const { reaction } = payload;
+    const threadId = this.encodeThreadId({
+      accountId: payload.account.id,
+      conversationId: payload.conversation.id,
+    });
+
+    // chat-sdk requires an EmojiValue. fromGChat normalizes a raw unicode emoji
+    // (e.g. "👍" -> thumbs_up) and falls back to a raw EmojiValue when unknown.
+    const emojiValue = defaultEmojiResolver.fromGChat(reaction.emoji);
+
+    this.chat!.processReaction(
+      {
+        added: reaction.action === "added",
+        emoji: emojiValue,
+        rawEmoji: reaction.emoji,
+        // The message that was reacted to. Prefer the Zernio id; fall back to the
+        // platform id (always present).
+        messageId: reaction.messageId ?? reaction.platformMessageId,
+        threadId,
+        user: {
+          userId: reaction.sender.id,
+          userName: reaction.sender.username ?? reaction.sender.id,
+          fullName: reaction.sender.name ?? "",
+          isBot: false,
+          isMe: false,
+        },
+        raw: payload,
+      },
+      options,
+    );
     return new Response("OK", { status: 200 });
   }
 
@@ -480,22 +535,79 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
   // ─── Fetching ─────────────────────────────────────────────────────────────
 
   /**
+   * Normalize a REST `GET /messages` message into the webhook-shaped
+   * `ZernioRawMessage` that `parseMessage` expects.
+   *
+   * The REST list endpoint flattens the sender (`senderId`/`senderName`), names
+   * the body `message`, and uses `createdAt`; the webhook payload nests `sender`
+   * and uses `text`/`sentAt`. `parseMessage` was written against the webhook
+   * shape, so feeding it REST messages directly threw on `raw.sender.id`
+   * (GitHub issue #3). This bridges the two, tolerating EITHER shape so the
+   * adapter keeps working if the REST surface later converges on the webhook one.
+   */
+  private restToRawMessage(m: ZernioRestMessage): ZernioRawMessage {
+    // A REST message may already carry webhook-shaped fields; read them defensively.
+    const webhookShape = m as Partial<ZernioRawMessage>;
+    return {
+      id: m.id,
+      conversationId: m.conversationId ?? "",
+      platform: m.platform ?? "",
+      platformMessageId: webhookShape.platformMessageId ?? m.id,
+      direction: m.direction,
+      text: webhookShape.text ?? m.message ?? null,
+      attachments: Array.isArray(m.attachments)
+        ? m.attachments.map((a) => ({
+            type: a.type as ZernioAttachment["type"],
+            url: a.url ?? "",
+            ...(a.payload ? { payload: a.payload } : {}),
+          }))
+        : [],
+      sender: webhookShape.sender ?? {
+        id: m.senderId ?? "",
+        name: m.senderName,
+        ...(m.senderPhoneNumber ? { phoneNumber: m.senderPhoneNumber } : {}),
+      },
+      sentAt: webhookShape.sentAt ?? m.sentAt ?? m.createdAt ?? new Date().toISOString(),
+      isRead: webhookShape.isRead ?? m.isRead ?? false,
+    };
+  }
+
+  /**
    * Fetch messages for a conversation.
-   * Returns all messages (no cursor pagination on the Zernio messages endpoint currently).
-   * Messages are returned in chronological order (oldest first).
+   *
+   * chat-sdk semantics (FetchResult): messages come back oldest-first WITHIN the
+   * page, and `direction` selects which page:
+   *  - `backward` (default): the N most recent messages → Zernio `sortOrder=desc`,
+   *    then we reverse the page to chronological order. `nextCursor` walks older.
+   *  - `forward`: the N oldest (or next N after the cursor) → Zernio `sortOrder=asc`.
+   *
+   * `limit` and `cursor` are forwarded to the REST endpoint (previously dropped,
+   * so callers always got the oldest 100). `nextCursor` is wired from the
+   * endpoint's `pagination.nextCursor` (previously hardcoded `undefined`).
    */
   async fetchMessages(
     threadId: string,
-    _options?: FetchOptions,
+    options?: FetchOptions,
   ): Promise<FetchResult<ZernioRawMessage>> {
     const { accountId, conversationId } = this.decodeThreadId(threadId);
-    const response = await this.api.fetchMessages(conversationId, accountId);
 
-    const messages = response.messages.map((raw) => this.parseMessage(raw));
+    const direction = options?.direction ?? "backward";
+    const sortOrder = direction === "forward" ? "asc" : "desc";
+
+    const response = await this.api.fetchMessages(conversationId, accountId, {
+      limit: options?.limit,
+      cursor: options?.cursor,
+      sortOrder,
+    });
+
+    const rawList = response.messages ?? [];
+    // `desc` returns newest-first; FetchResult wants oldest-first within the page.
+    const ordered = sortOrder === "desc" ? [...rawList].reverse() : rawList;
+    const messages = ordered.map((raw) => this.parseMessage(this.restToRawMessage(raw)));
 
     return {
       messages,
-      nextCursor: undefined,
+      nextCursor: response.pagination?.nextCursor ?? undefined,
     };
   }
 
@@ -542,16 +654,21 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
   // ─── Streaming ──────────────────────────────────────────────────────────
 
   /**
-   * Stream AI responses using post-then-edit pattern.
-   * Posts an initial message, then edits it as tokens arrive.
+   * Stream an AI response to a conversation.
    *
-   * Works on Telegram (supports message editing). On other platforms,
-   * collects the full stream and posts once since editing isn't supported.
+   * Only platforms that support message editing (Telegram today) can render a
+   * response token-by-token. On every other platform (WhatsApp, Instagram,
+   * Facebook, X, Bluesky, Reddit) `editMessage` returns an error, so the old
+   * post-then-edit approach delivered ONLY the first chunk and silently dropped
+   * the rest. We therefore detect the platform up front:
+   *  - Telegram: post an initial message and edit it as chunks arrive (throttled).
+   *  - Everyone else (or if detection fails): buffer the whole stream and post
+   *    once, so the recipient always receives the complete reply.
    */
   async stream(
     threadId: string,
     textStream: AsyncIterable<string | import("chat").StreamChunk>,
-    options?: import("chat").StreamOptions,
+    _options?: import("chat").StreamOptions,
   ): Promise<RawMessage<ZernioRawMessage>> {
     const { accountId, conversationId } = this.decodeThreadId(threadId);
 
@@ -562,13 +679,35 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
       return "";
     };
 
-    // Collect the first chunk to have initial content
+    // Determine whether the platform supports live message editing. Default to
+    // "no" (post-once) when the lookup fails, since a complete message is always
+    // better than a truncated one.
+    let supportsEditing = false;
+    try {
+      const info = await this.fetchThread(threadId);
+      supportsEditing = info.metadata?.platform === "telegram";
+    } catch {
+      supportsEditing = false;
+    }
+
+    // Non-editable platforms: collect the full response, then post it once.
+    if (!supportsEditing) {
+      let full = "";
+      for await (const chunk of textStream) full += chunkToText(chunk);
+      const result = await this.api.sendMessage(conversationId, {
+        accountId,
+        message: full || "...",
+      });
+      const messageId = (result.messageId as string) ?? (result.id as string) ?? "";
+      return this.buildOutgoingRaw(messageId, threadId, conversationId, full);
+    }
+
+    // Editable platform (Telegram): post-then-edit as chunks arrive (throttled).
     let buffer = "";
     const iterator = textStream[Symbol.asyncIterator]();
     const first = await iterator.next();
     if (!first.done) buffer = chunkToText(first.value);
 
-    // Post initial message
     const result = await this.api.sendMessage(conversationId, {
       accountId,
       message: buffer || "...",
@@ -590,21 +729,35 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
           });
           lastEditTime = now;
         } catch {
-          // Edit failed (platform doesn't support it), continue collecting
+          // Edit failed mid-stream; keep collecting and try the final edit.
         }
       }
     }
 
-    // Final edit with complete text
+    // Final edit with the complete text.
     try {
       await this.api.editMessage(conversationId, messageId, {
         accountId,
         text: buffer,
       });
     } catch {
-      // If edit fails, the last successful edit or initial post is the final state
+      // The last successful edit / initial post remains the final state.
     }
 
+    return this.buildOutgoingRaw(messageId, threadId, conversationId, buffer);
+  }
+
+  /**
+   * Build the synthetic outgoing RawMessage returned by the streaming paths.
+   * The Zernio send API doesn't echo the full message object back, so we
+   * reconstruct the minimal shape chat-sdk needs.
+   */
+  private buildOutgoingRaw(
+    messageId: string,
+    threadId: string,
+    conversationId: string,
+    text: string,
+  ): RawMessage<ZernioRawMessage> {
     return {
       id: messageId,
       threadId,
@@ -614,7 +767,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
         platform: "",
         platformMessageId: "",
         direction: "outgoing",
-        text: buffer,
+        text,
         attachments: [],
         sender: { id: "bot" },
         sentAt: new Date().toISOString(),
