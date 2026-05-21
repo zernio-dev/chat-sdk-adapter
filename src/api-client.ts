@@ -72,14 +72,24 @@ export class ZernioApiClient {
   /**
    * Fetch messages for a conversation.
    * GET /v1/inbox/conversations/{conversationId}/messages?accountId=...
+   *
+   * Forwards pagination/ordering when provided:
+   *  - `limit`     page size (endpoint caps at 100)
+   *  - `cursor`    opaque cursor from a prior `pagination.nextCursor`
+   *  - `sortOrder` 'asc' (oldest first) | 'desc' (newest first)
    */
   async fetchMessages(
     conversationId: string,
     accountId: string,
+    options?: { limit?: number; cursor?: string; sortOrder?: "asc" | "desc" },
   ): Promise<ZernioMessageListResponse> {
+    const params = new URLSearchParams({ accountId });
+    if (options?.limit != null) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", options.cursor);
+    if (options?.sortOrder) params.set("sortOrder", options.sortOrder);
     return this.request<ZernioMessageListResponse>(
       "GET",
-      `/v1/inbox/conversations/${conversationId}/messages?accountId=${encodeURIComponent(accountId)}`,
+      `/v1/inbox/conversations/${conversationId}/messages?${params.toString()}`,
     );
   }
 

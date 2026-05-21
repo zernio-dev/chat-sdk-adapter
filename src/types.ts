@@ -134,6 +134,32 @@ export interface ZernioWebhookComment {
   parentCommentId: string | null;
 }
 
+/**
+ * Full reaction.received webhook payload envelope.
+ *
+ * Fired when a participant adds or removes an emoji reaction (WhatsApp, Telegram).
+ * Distinct from message.received so reactions route to chat-sdk's onReaction
+ * instead of being mistaken for an inbound DM.
+ */
+export interface ZernioReactionWebhookPayload {
+  id: string;
+  event: "reaction.received";
+  timestamp: string;
+  reaction: {
+    /** The emoji reacted with. May be empty on `removed` (WhatsApp). */
+    emoji: string;
+    action: "added" | "removed";
+    /** Zernio Message id of the reacted-to message, when resolvable. */
+    messageId?: string;
+    /** Platform-native id of the reacted-to message (e.g. WhatsApp wamid). */
+    platformMessageId: string;
+    sender: ZernioSender;
+    reactedAt: string;
+  };
+  conversation: ZernioWebhookConversation;
+  account: ZernioWebhookAccount;
+}
+
 /** Full comment.received webhook payload envelope. */
 export interface ZernioCommentWebhookPayload {
   id: string;
@@ -190,10 +216,49 @@ export interface ZernioConversation {
   updatedTime?: string;
 }
 
+/**
+ * A message as returned by the REST `GET /messages` LIST endpoint.
+ *
+ * IMPORTANT: this is a DIFFERENT shape from the webhook `ZernioRawMessage`.
+ * The REST endpoint flattens the sender (`senderId` / `senderName` instead of a
+ * nested `sender` object), names the body `message` (not `text`), and uses
+ * `createdAt` (not `sentAt`). The adapter normalizes this into `ZernioRawMessage`
+ * before parsing (see `ZernioAdapter.restToRawMessage`). Conflating the two shapes
+ * was the cause of GitHub issue #3 (fetchMessages threw on `raw.sender.id`).
+ */
+export interface ZernioRestMessage {
+  id: string;
+  conversationId?: string;
+  accountId?: string;
+  platform?: string;
+  /** The message body. REST uses `message`; webhook uses `text`. */
+  message?: string | null;
+  senderId?: string;
+  senderName?: string;
+  senderPhoneNumber?: string;
+  direction: "incoming" | "outgoing";
+  /** REST uses `createdAt`; webhook uses `sentAt`. Both are ISO strings. */
+  createdAt?: string;
+  sentAt?: string;
+  attachments?: Array<{
+    id?: string;
+    type: string;
+    url?: string;
+    mimeType?: string;
+    name?: string;
+    payload?: Record<string, unknown>;
+  }>;
+  isRead?: boolean;
+}
+
 /** Response from GET /v1/inbox/conversations/{conversationId}/messages. */
 export interface ZernioMessageListResponse {
   status: string;
-  messages: ZernioRawMessage[];
+  messages: ZernioRestMessage[];
+  /** Present when the endpoint paginates. `nextCursor` is opaque (db:/live: prefixed). */
+  pagination?: { hasMore: boolean; nextCursor: string | null };
+  /** Order the endpoint actually applied (live-API platforms may ignore the request). */
+  sortOrderApplied?: "asc" | "desc";
   lastUpdated: string;
 }
 
