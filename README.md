@@ -85,7 +85,7 @@ Connect the social accounts you want your bot to handle through the Zernio dashb
 Create a webhook in your Zernio dashboard pointing to your bot's webhook endpoint:
 
 - **URL**: `https://your-app.com/api/chat-webhook`
-- **Events**: Select `message.received` and `comment.received`
+- **Events**: Select `message.received` and `comment.received`. Add `reaction.received` if you handle reactions (routes to `bot.onReaction`).
 - **Secret**: Set a strong secret and pass it as `ZERNIO_WEBHOOK_SECRET`
 
 ### 4. Enable the Inbox Addon
@@ -199,6 +199,24 @@ bot.onNewMessage(/.*/, async (thread, message) => {
   await thread.post(result.textStream);
 });
 ```
+
+## Receiving Reactions
+
+Reactions (WhatsApp and Telegram) route to `onReaction`, not `onNewMessage`, so a 👍 is never treated as an inbound message. Subscribe your webhook to `reaction.received` to receive them.
+
+```typescript
+bot.onReaction(async (event) => {
+  // event.emoji     normalized emoji (use event.rawEmoji for the raw platform value)
+  // event.added     true when added, false when removed
+  // event.messageId the message that was reacted to
+  // event.thread    the thread where it happened
+  if (event.added) {
+    await event.thread.post(`Thanks for the ${event.emoji}!`);
+  }
+});
+```
+
+> Telegram only delivers reactions when the bot is an administrator in the chat (never in private chats). On WhatsApp removals the emoji is reported as an empty string.
 
 ## Platform-Specific Data
 
