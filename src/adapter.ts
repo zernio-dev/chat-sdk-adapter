@@ -162,7 +162,9 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
       return this.handleReactionReceived(payload as ZernioReactionWebhookPayload, options);
     }
 
-    // Unhandled event type, acknowledge receipt
+    // Unhandled event type, acknowledge receipt. (Call lifecycle + message
+    // delivery-status events are intentionally NOT handled here: they aren't Chat
+    // SDK concepts. Subscribe to them with your own Zernio webhook handler.)
     return new Response("OK", { status: 200 });
   }
 
@@ -184,8 +186,14 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
       conversationId: payload.message.conversationId,
     });
 
+    // Copy the envelope metadata (interactive reply, ad referral, quoted-message
+    // context) onto the raw message so handlers can read it off message.raw.metadata.
+    const rawMessage: ZernioRawMessage = payload.metadata
+      ? { ...payload.message, metadata: payload.metadata }
+      : payload.message;
+
     const factory = async (): Promise<Message<ZernioRawMessage>> => {
-      return this.parseMessage(payload.message);
+      return this.parseMessage(rawMessage);
     };
 
     this.chat!.processMessage(this, threadId, factory, options);
@@ -342,8 +350,14 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
         dateSent: new Date(raw.sentAt),
         edited: false,
       },
+      // chat-sdk Attachment.type is fixed to image/file/video/audio. Media types
+      // pass through; everything else (location, contact, sticker, share) maps to
+      // "file" — the true Zernio type + payload stay on `raw.attachments`.
       attachments: raw.attachments.map((att) => ({
-        type: att.type as "image" | "video" | "audio" | "file",
+        type:
+          att.type === "image" || att.type === "video" || att.type === "audio"
+            ? att.type
+            : ("file" as const),
         url: att.url,
       })),
     });
@@ -374,11 +388,13 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     const body: Record<string, unknown> = { accountId };
 
     if (card) {
-      // Map card to native Zernio rich message format (buttons, templates)
+      // Map card to native Zernio rich message format (buttons, templates, or a
+      // WhatsApp interactive list when the card carries a Select/RadioSelect).
       const mapped = mapCardToZernioMessage(card as any);
       body.message = mapped.message || undefined;
       if (mapped.buttons) body.buttons = mapped.buttons;
       if (mapped.template) body.template = mapped.template;
+      if (mapped.interactive) body.interactive = mapped.interactive;
     } else {
       // Plain text / markdown / AST
       body.message = this.converter.renderPostable(message) || undefined;

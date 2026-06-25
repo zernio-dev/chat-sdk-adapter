@@ -212,4 +212,86 @@ describe("mapCardToZernioMessage", () => {
     expect(result.buttons![0].type).toBe("postback");
     expect(result.buttons![1].type).toBe("url");
   });
+
+  // ─── WhatsApp interactive list (Select / RadioSelect) ──────────────────────
+
+  it("maps a Select into a WhatsApp interactive list", () => {
+    const result = mapCardToZernioMessage({
+      type: "card",
+      title: "Pick a plan",
+      children: [
+        {
+          type: "actions",
+          children: [
+            {
+              type: "select",
+              id: "plan",
+              placeholder: "Choose plan",
+              options: [
+                { label: "Basic", value: "basic", description: "$10/mo" },
+                { label: "Pro", value: "pro" },
+              ],
+            } as any,
+          ],
+        },
+      ],
+    });
+
+    expect(result.interactive).toBeDefined();
+    expect(result.interactive!.type).toBe("list");
+    const list = result.interactive as Extract<typeof result.interactive, { type: "list" }>;
+    expect(list.body.text).toBe("Pick a plan");
+    expect(list.action.button).toBe("Choose plan");
+    expect(list.action.sections[0].rows).toEqual([
+      { id: "basic", title: "Basic", description: "$10/mo" },
+      { id: "pro", title: "Pro" },
+    ]);
+    // Buttons are dropped: a list can't coexist with reply buttons on WhatsApp.
+    expect(result.buttons).toBeUndefined();
+  });
+
+  it("maps a RadioSelect (radio_select) into a list and prefers it over buttons", () => {
+    const result = mapCardToZernioMessage({
+      type: "card",
+      children: [
+        {
+          type: "actions",
+          children: [
+            { type: "button", id: "ignored", label: "Ignored" } as any,
+            {
+              type: "radio_select",
+              id: "size",
+              label: "Size",
+              options: [{ label: "Small", value: "s" }],
+            } as any,
+          ],
+        },
+      ],
+    });
+
+    expect(result.interactive?.type).toBe("list");
+    expect(result.buttons).toBeUndefined();
+  });
+
+  it("truncates list button/row labels to WhatsApp limits", () => {
+    const result = mapCardToZernioMessage({
+      type: "card",
+      children: [
+        {
+          type: "actions",
+          children: [
+            {
+              type: "select",
+              id: "x",
+              placeholder: "This button label is definitely way too long",
+              options: [{ label: "A very long row title that exceeds the limit here", value: "v" }],
+            } as any,
+          ],
+        },
+      ],
+    });
+    const list = result.interactive as Extract<typeof result.interactive, { type: "list" }>;
+    expect(list.action.button.length).toBeLessThanOrEqual(20);
+    expect(list.action.sections[0].rows[0].title.length).toBeLessThanOrEqual(24);
+  });
 });

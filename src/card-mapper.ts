@@ -10,7 +10,7 @@
  * fallback text via the format converter's cardToFallbackText().
  */
 
-import type { ZernioSendMessageBody } from "./types.js";
+import type { ZernioSendMessageBody, WhatsAppInteractive } from "./types.js";
 
 // ─── Card Element Types (mirrored from chat-sdk) ────────────────────────────
 // We use structural typing rather than importing the chat-sdk types directly,
@@ -37,8 +37,17 @@ type CardChildLike =
 type ActionChildLike =
   | { type: "button"; id: string; label: string; style?: string; value?: string; disabled?: boolean }
   | { type: "link-button"; label: string; url: string; style?: string }
-  | { type: "select"; id: string; placeholder?: string; children?: unknown[] }
-  | { type: "radio-select"; id: string; children?: unknown[] };
+  // chat-sdk Select / RadioSelect. NB: the element uses `options` (not children)
+  // and the radio type is "radio_select" (underscore). These map to a WhatsApp
+  // interactive list message.
+  | { type: "select"; id: string; label?: string; placeholder?: string; options?: SelectOptionLike[] }
+  | { type: "radio_select"; id: string; label?: string; placeholder?: string; options?: SelectOptionLike[] };
+
+interface SelectOptionLike {
+  label: string;
+  value: string;
+  description?: string;
+}
 
 interface FieldLike {
   type: "field";
@@ -59,6 +68,42 @@ export interface CardMappingResult {
   buttons?: ZernioSendMessageBody["buttons"];
   /** Template with elements (for cards with image + title + buttons). */
   template?: ZernioSendMessageBody["template"];
+  /**
+   * WhatsApp interactive list, mapped from a Select / RadioSelect in the card.
+   * A list can't coexist with reply buttons in one WhatsApp message, so when a
+   * select is present it takes precedence and `buttons` is omitted.
+   */
+  interactive?: WhatsAppInteractive;
+}
+
+/** WhatsApp list limits (Cloud API): keep the mapping within them. */
+const LIST_BUTTON_MAX = 20;
+const LIST_ROW_TITLE_MAX = 24;
+const LIST_ROW_DESC_MAX = 72;
+const LIST_ROWS_MAX = 10;
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+/** Map a chat-sdk Select / RadioSelect into a WhatsApp interactive list. */
+function selectToList(
+  select: { id: string; label?: string; placeholder?: string; options?: SelectOptionLike[] },
+  bodyText: string,
+): WhatsAppInteractive {
+  const rows = (select.options ?? []).slice(0, LIST_ROWS_MAX).map((opt) => ({
+    id: opt.value,
+    title: truncate(opt.label, LIST_ROW_TITLE_MAX),
+    ...(opt.description ? { description: truncate(opt.description, LIST_ROW_DESC_MAX) } : {}),
+  }));
+  return {
+    type: "list",
+    body: { text: bodyText || select.label || "Select an option" },
+    action: {
+      button: truncate(select.placeholder || select.label || "Select", LIST_BUTTON_MAX),
+      sections: [{ rows }],
+    },
+  };
 }
 
 /**
@@ -76,6 +121,8 @@ export interface CardMappingResult {
 export function mapCardToZernioMessage(card: CardLike): CardMappingResult {
   const textParts: string[] = [];
   const buttons: NonNullable<ZernioSendMessageBody["buttons"]> = [];
+  // First select/radio-select found — mapped to a WhatsApp list below.
+  let select: { id: string; label?: string; placeholder?: string; options?: SelectOptionLike[] } | undefined;
 
   // Extract title and subtitle
   if (card.title) textParts.push(card.title);
@@ -102,8 +149,10 @@ export function mapCardToZernioMessage(card: CardLike): CardMappingResult {
               title: action.label,
               url: action.url,
             });
+          } else if ((action.type === "select" || action.type === "radio_select") && !select) {
+            // Select / RadioSelect -> WhatsApp interactive list (first one wins).
+            select = action;
           }
-          // Select/RadioSelect are not mappable to Zernio's button format
         }
         break;
 
@@ -142,6 +191,16 @@ export function mapCardToZernioMessage(card: CardLike): CardMappingResult {
   }
 
   const message = textParts.join("\n");
+
+  // A Select / RadioSelect becomes a WhatsApp interactive list. It can't coexist
+  // with reply buttons in one WhatsApp message, so the list takes precedence and
+  // buttons are dropped (the select is the explicit choice affordance).
+  if (select && (select.options?.length ?? 0) > 0) {
+    return {
+      message,
+      interactive: selectToList(select, message),
+    };
+  }
 
   // If the card has an image + title + buttons, use a generic template
   // (renders as a carousel card on Facebook/Instagram)

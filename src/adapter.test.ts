@@ -289,6 +289,46 @@ describe("handleWebhook", () => {
     expect(typeof factoryArg).toBe("function");
   });
 
+  it("surfaces WhatsApp interactive-reply metadata on message.raw.metadata", async () => {
+    const payload = makeWebhookPayload({
+      metadata: { interactiveType: "list_reply", interactiveId: "row-pro" },
+    } as any);
+    const body = JSON.stringify(payload);
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "X-Zernio-Signature": signPayload(body),
+        "X-Zernio-Event": "message.received",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    await adapter.handleWebhook(request);
+    const [, , factoryArg] = mockChat.processMessage.mock.calls[0];
+    const message = await factoryArg();
+    expect(message.raw.metadata).toEqual({ interactiveType: "list_reply", interactiveId: "row-pro" });
+  });
+
+  it("skips call.* and message-status events (not Chat SDK concepts)", async () => {
+    for (const event of ["call.received", "call.ended", "message.delivered", "message.read"]) {
+      const body = JSON.stringify({ id: "e", event, timestamp: "t" });
+      const request = new Request("https://example.com/webhook", {
+        method: "POST",
+        headers: {
+          "X-Zernio-Signature": signPayload(body),
+          "X-Zernio-Event": event,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
+      const response = await adapter.handleWebhook(request);
+      expect(response.status).toBe(200);
+    }
+    expect(mockChat.processMessage).not.toHaveBeenCalled();
+    expect(mockChat.processReaction).not.toHaveBeenCalled();
+  });
+
   it("skips outgoing messages (prevents echo loop)", async () => {
     const payload = makeWebhookPayload({
       message: makeRawMessage({ direction: "outgoing" }),

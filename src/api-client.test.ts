@@ -227,4 +227,57 @@ describe("ZernioApiClient", () => {
       expect(calledUrl).not.toContain("//v1");
     });
   });
+
+  // ─── WhatsApp rich-message helpers ────────────────────────────────────────
+
+  describe("WhatsApp helpers", () => {
+    function mockOk() {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, data: { messageId: "m1" } }), { status: 200 }),
+      );
+    }
+    function sentBody(): Record<string, unknown> {
+      return JSON.parse((fetch as any).mock.calls[0][1].body);
+    }
+
+    it("sendInteractive posts the interactive payload (and replyTo)", async () => {
+      mockOk();
+      await client.sendInteractive(
+        "conv-1",
+        "acc-1",
+        { type: "button", body: { text: "Pick" }, action: { buttons: [{ type: "reply", reply: { id: "y", title: "Yes" } }] } },
+        { replyTo: "wamid.X" },
+      );
+      const body = sentBody();
+      expect((body.interactive as any).type).toBe("button");
+      expect(body.replyTo).toBe("wamid.X");
+      expect(body.accountId).toBe("acc-1");
+    });
+
+    it("sendLocation posts a location pin", async () => {
+      mockOk();
+      await client.sendLocation("conv-1", "acc-1", { latitude: 41.3, longitude: 2.1, name: "HQ" });
+      expect((sentBody().location as any).latitude).toBe(41.3);
+    });
+
+    it("sendContacts posts contact cards", async () => {
+      mockOk();
+      await client.sendContacts("conv-1", "acc-1", [{ name: { formatted_name: "Ana" } }]);
+      expect((sentBody().contacts as any)[0].name.formatted_name).toBe("Ana");
+    });
+
+    it("sendTemplate wraps the template element", async () => {
+      mockOk();
+      await client.sendTemplate("conv-1", "acc-1", { name: "hello", language: "en_US" });
+      expect((sentBody().template as any).elements[0]).toEqual({ name: "hello", language: "en_US" });
+    });
+
+    it("reply quotes a message with replyTo", async () => {
+      mockOk();
+      await client.reply("conv-1", "acc-1", "wamid.Q", "thanks");
+      const body = sentBody();
+      expect(body.replyTo).toBe("wamid.Q");
+      expect(body.message).toBe("thanks");
+    });
+  });
 });
