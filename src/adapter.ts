@@ -513,6 +513,64 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     await this.api.deleteMessage(conversationId, messageId, accountId);
   }
 
+  // ─── Opening conversations ────────────────────────────────────────────────
+
+  /**
+   * Open a direct-message thread with a recipient (Chat SDK `chat.openDM`).
+   *
+   * Because one Zernio account = one channel, the recipient must be namespaced
+   * with the account: pass `userId` as `"{accountId}:{recipient}"` (the
+   * recipient is a phone/E.164 for WhatsApp, or the platform user id otherwise).
+   *
+   * This is resolution-only and makes NO network call: the Zernio inbox send
+   * endpoint accepts the recipient handle directly as the conversation id, so we
+   * return the thread id deterministically and the FIRST `post()` opens the
+   * conversation. For WhatsApp that first message must be an approved template
+   * (24h-window rule) — use `openConversation()` to send it in one step.
+   */
+  async openDM(userId: string): Promise<string> {
+    const sep = userId.indexOf(":");
+    if (sep <= 0 || sep === userId.length - 1) {
+      throw new ValidationError(
+        "zernio",
+        `openDM expects "{accountId}:{recipient}" (one account = one channel). Got "${userId}".`,
+      );
+    }
+    const accountId = userId.slice(0, sep);
+    const recipient = userId.slice(sep + 1);
+    return this.encodeThreadId({ accountId, conversationId: recipient });
+  }
+
+  /**
+   * Cold-start a conversation by sending its opening message, and return the
+   * thread id. Unlike `openDM`, this actually creates the conversation via the
+   * Zernio API, so it works for WhatsApp: pass a `template` (the only way to
+   * open outside the 24h window). Other platforms can open with `message`.
+   */
+  async openConversation(params: {
+    accountId: string;
+    /** Recipient: phone/E.164 for WhatsApp, platform user id otherwise. */
+    to: string;
+    /** Opening text (non-WhatsApp, or WhatsApp within the 24h window). */
+    message?: string;
+    /** WhatsApp approved template — required to open a WhatsApp conversation cold. */
+    template?: { name: string; language: string; params?: string[] };
+  }): Promise<string> {
+    const data = await this.api.createConversation({
+      accountId: params.accountId,
+      participantId: params.to,
+      ...(params.message ? { message: params.message } : {}),
+      ...(params.template
+        ? {
+            templateName: params.template.name,
+            templateLanguage: params.template.language,
+            ...(params.template.params ? { templateParams: params.template.params } : {}),
+          }
+        : {}),
+    });
+    return this.encodeThreadId({ accountId: params.accountId, conversationId: data.conversationId });
+  }
+
   // ─── Reactions ────────────────────────────────────────────────────────────
 
   /**

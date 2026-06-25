@@ -143,6 +143,53 @@ describe("Thread ID encode/decode", () => {
   });
 });
 
+// ─── openDM / openConversation ──────────────────────────────────────────────
+
+describe("openDM", () => {
+  const adapter = new ZernioAdapter(TEST_CONFIG);
+
+  it("resolves an account-namespaced recipient to a thread id (no network)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const threadId = await adapter.openDM("acc-123:16505551234");
+    expect(threadId).toBe("zernio:acc-123:16505551234");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("throws when the recipient is not account-namespaced", async () => {
+    await expect(adapter.openDM("16505551234")).rejects.toThrow(ValidationError);
+    await expect(adapter.openDM("acc-123:")).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("openConversation", () => {
+  const adapter = new ZernioAdapter(TEST_CONFIG);
+  afterEach(() => vi.restoreAllMocks());
+
+  it("cold-starts a WhatsApp conversation with a template and returns the thread id", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ success: true, data: { conversationId: "16505551234", messageId: "wamid.1", participantId: "16505551234", participantName: "16505551234" } }),
+        { status: 201 },
+      ),
+    );
+    const threadId = await adapter.openConversation({
+      accountId: "acc-9",
+      to: "16505551234",
+      template: { name: "welcome", language: "en_US", params: ["Ana"] },
+    });
+    expect(threadId).toBe("zernio:acc-9:16505551234");
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      accountId: "acc-9",
+      participantId: "16505551234",
+      templateName: "welcome",
+      templateLanguage: "en_US",
+      templateParams: ["Ana"],
+    });
+  });
+});
+
 // ─── parseMessage Tests ─────────────────────────────────────────────────────
 
 describe("parseMessage", () => {

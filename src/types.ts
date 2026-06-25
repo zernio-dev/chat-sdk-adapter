@@ -435,3 +435,31 @@ export interface ZernioConversationListResponse {
     nextCursor: string | null;
   };
 }
+
+/**
+ * Body for POST /v1/inbox/conversations — cold-start a conversation from a
+ * recipient. WhatsApp requires an approved template (`templateName` +
+ * `templateLanguage`) since you can't open outside the 24h window without one;
+ * other platforms can open with a plain `message`.
+ */
+export interface ZernioCreateConversationBody {
+  accountId: string;
+  /** Recipient handle: phone/E.164 for WhatsApp, platform user id otherwise. */
+  participantId?: string;
+  participantUsername?: string;
+  message?: string;
+  /** WhatsApp approved template name (required for WhatsApp cold-start). */
+  templateName?: string;
+  /** WhatsApp template language code (e.g. "en_US"). */
+  templateLanguage?: string;
+  /** Ordered template body variable values. */
+  templateParams?: string[];
+}
+
+/** Response data from POST /v1/inbox/conversations. */
+export interface ZernioCreateConversationData {
+  messageId: string;
+  conversationId: string;
+  participantId: string;
+  participantName: string;
+}

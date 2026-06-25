@@ -279,5 +279,23 @@ describe("ZernioApiClient", () => {
       expect(body.replyTo).toBe("wamid.Q");
       expect(body.message).toBe("thanks");
     });
+
+    it("createConversation posts to the conversations collection and returns data", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ success: true, data: { conversationId: "16505551234", messageId: "wamid.1", participantId: "16505551234", participantName: "16505551234" } }),
+          { status: 201 },
+        ),
+      );
+      const data = await client.createConversation({
+        accountId: "acc-1",
+        participantId: "16505551234",
+        templateName: "hello",
+        templateLanguage: "en_US",
+      });
+      expect(data.conversationId).toBe("16505551234");
+      expect((fetch as any).mock.calls[0][0]).toBe(`${baseUrl}/v1/inbox/conversations`);
+      expect(sentBody().templateName).toBe("hello");
+    });
   });
 });

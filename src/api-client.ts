@@ -17,6 +17,8 @@ import type {
   ZernioConversationListResponse,
   ZernioMessageListResponse,
   ZernioSendMessageBody,
+  ZernioCreateConversationBody,
+  ZernioCreateConversationData,
   WhatsAppInteractive,
   WhatsAppLocation,
   WhatsAppContact,
@@ -158,6 +160,24 @@ export class ZernioApiClient {
       "GET",
       `/v1/inbox/conversations/${conversationId}/messages?${params.toString()}`,
     );
+  }
+
+  /**
+   * Cold-start a conversation from a recipient (no prior inbound needed).
+   * POST /v1/inbox/conversations
+   *
+   * WhatsApp requires an approved template; other platforms can open with a
+   * plain `message`. Returns the created/existing conversation id.
+   */
+  async createConversation(
+    body: ZernioCreateConversationBody,
+  ): Promise<ZernioCreateConversationData> {
+    const result = await this.request<{ success: boolean; data: ZernioCreateConversationData }>(
+      "POST",
+      `/v1/inbox/conversations`,
+      body,
+    );
+    return result.data;
   }
 
   /**

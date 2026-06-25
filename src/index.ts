@@ -48,6 +48,8 @@ export type {
   ZernioConversation,
   ZernioMessageListResponse,
   ZernioConversationListResponse,
+  ZernioCreateConversationBody,
+  ZernioCreateConversationData,
   ZernioCommentWebhookPayload,
   ZernioCommentAuthor,
   ZernioWebhookComment,
