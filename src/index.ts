@@ -41,15 +41,24 @@ export type {
   ZernioWebhookConversation,
   ZernioWebhookAccount,
   ZernioWebhookMetadata,
+  ZernioReferral,
   ZernioAttachment,
   ZernioSender,
   ZernioSendMessageBody,
   ZernioConversation,
   ZernioMessageListResponse,
   ZernioConversationListResponse,
+  ZernioCreateConversationBody,
+  ZernioCreateConversationData,
   ZernioCommentWebhookPayload,
   ZernioCommentAuthor,
   ZernioWebhookComment,
+  // WhatsApp message content (sent via the exported ZernioApiClient, alongside the adapter)
+  WhatsAppInteractive,
+  WhatsAppInteractiveHeader,
+  WhatsAppLocation,
+  WhatsAppContact,
+  WhatsAppTemplate,
 } from "./types.js";
 
 export type { CardMappingResult } from "./card-mapper.js";

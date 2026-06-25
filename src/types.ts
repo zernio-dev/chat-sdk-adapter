@@ -41,7 +41,7 @@ export interface ZernioThreadId {
 
 /** Attachment included in a message. */
 export interface ZernioAttachment {
-  type: "image" | "video" | "audio" | "file" | "sticker" | "share";
+  type: "image" | "video" | "audio" | "file" | "sticker" | "share" | "location" | "contact";
   url: string;
   payload?: Record<string, unknown>;
 }
@@ -73,6 +73,13 @@ export interface ZernioRawMessage {
   sender: ZernioSender;
   sentAt: string;
   isRead: boolean;
+  /**
+   * Webhook envelope metadata, copied onto the raw message by the adapter so
+   * handlers can read interactive replies (button/list/flow), ad referral, and
+   * quoted-message context off `message.raw.metadata` (the chat-sdk
+   * MessageMetadata type is fixed and has no room for these).
+   */
+  metadata?: ZernioWebhookMetadata;
 }
 
 /** Conversation context from the webhook payload. */
@@ -100,6 +107,51 @@ export interface ZernioWebhookMetadata {
   postbackPayload?: string;
   postbackTitle?: string;
   callbackData?: string;
+
+  // ─── WhatsApp interactive replies ──────────────────────────────────────────
+  // When a recipient taps a reply button, picks a list row, or submits a Flow,
+  // WhatsApp delivers it as a normal message.received whose interactive context
+  // lands here. `interactiveId` carries the button/row id you set when sending.
+  /** Kind of interactive reply the inbound message represents. */
+  interactiveType?: "button_reply" | "list_reply" | "nfm_reply";
+  /** The id of the tapped reply button or selected list row. */
+  interactiveId?: string;
+  /** Payload for a tapped template button (quick_reply/url template buttons). */
+  buttonPayload?: string;
+  /** Raw JSON string returned by a WhatsApp Flow (`nfm_reply`). */
+  flowResponseJson?: string;
+  /** Parsed Flow response, when `flowResponseJson` was valid JSON. */
+  flowResponseData?: Record<string, unknown>;
+  /** Platform message id this message quotes/replies to, when present. */
+  quotedMessageId?: string;
+  /** Click-to-WhatsApp / Click-to-Messenger ad attribution, when the conversation started from an ad. */
+  referral?: ZernioReferral;
+}
+
+/**
+ * Ad-referral attribution attached to an inbound message when the conversation
+ * was started from a Click-to-WhatsApp (CTWA), Click-to-Messenger (CTM), or
+ * Click-to-Instagram-Direct (CTD) ad. Fields are platform-dependent, so all are
+ * optional — read what's present.
+ */
+export interface ZernioReferral {
+  // Click-to-WhatsApp
+  ctwa_clid?: string;
+  source_id?: string;
+  source_type?: string;
+  source_url?: string;
+  headline?: string;
+  body?: string;
+  media_type?: string;
+  image_url?: string;
+  video_url?: string;
+  thumbnail_url?: string;
+  // Facebook Messenger CTM / Instagram CTD
+  ad_id?: string;
+  ref?: string;
+  source?: string;
+  type?: string;
+  ads_context_data?: Record<string, unknown>;
 }
 
 /** Full message.received webhook payload envelope. */
@@ -177,7 +229,7 @@ export interface ZernioSendMessageBody {
   accountId: string;
   message?: string;
   attachmentUrl?: string;
-  attachmentType?: "image" | "video" | "audio" | "file";
+  attachmentType?: "image" | "video" | "audio" | "file" | "sticker";
   quickReplies?: Array<{ type: string; payload: string; title?: string }>;
   buttons?: Array<{
     type: string;
@@ -186,20 +238,133 @@ export interface ZernioSendMessageBody {
     url?: string;
     phone?: string;
   }>;
-  template?: {
-    type: "generic";
-    elements: Array<{
-      title: string;
-      subtitle?: string;
-      imageUrl?: string;
-      buttons?: Array<{ type: string; title: string; url?: string; payload?: string }>;
-    }>;
-  };
+  template?:
+    | {
+        type: "generic";
+        elements: Array<{
+          title: string;
+          subtitle?: string;
+          imageUrl?: string;
+          buttons?: Array<{ type: string; title: string; url?: string; payload?: string }>;
+        }>;
+      }
+    | {
+        // WhatsApp approved template message (different from the FB/IG generic
+        // carousel above). The API discriminates on the elements[0] shape.
+        elements: [WhatsAppTemplate];
+      };
+  /** WhatsApp interactive message (buttons, list, cta_url, flow, location request, voice call). */
+  interactive?: WhatsAppInteractive;
+  /** WhatsApp location pin. */
+  location?: WhatsAppLocation;
+  /** WhatsApp contact cards (vCard). */
+  contacts?: WhatsAppContact[];
+  /** Send the attached audio as a WhatsApp voice note (PTT) rather than a file. */
+  isVoiceNote?: boolean;
   replyMarkup?: unknown;
   messagingType?: string;
   messageTag?: string;
+  /** Platform message id to quote/reply to (WhatsApp `context.message_id`). */
   replyTo?: string;
 }
+
+// ─── WhatsApp message content types ───────────────────────────────────────────
+
+/** A WhatsApp location pin. */
+export interface WhatsAppLocation {
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+}
+
+/** A WhatsApp contact card (vCard). */
+export interface WhatsAppContact {
+  name: { formatted_name: string; first_name?: string; last_name?: string };
+  phones?: Array<{ phone: string; type?: string }>;
+  emails?: Array<{ email: string; type?: string }>;
+}
+
+/** An approved WhatsApp template message element. */
+export interface WhatsAppTemplate {
+  name: string;
+  language: string;
+  components?: Array<Record<string, unknown>>;
+}
+
+/** Header for an interactive message (text or media). */
+export interface WhatsAppInteractiveHeader {
+  type: "text" | "image" | "video" | "document";
+  text?: string;
+  image?: { link: string };
+  video?: { link: string };
+  document?: { link: string; filename?: string };
+}
+
+/**
+ * The `interactive` payload sent to the Zernio messages endpoint. Mirrors the
+ * WhatsApp Cloud API interactive object: reply buttons, list, cta_url, flow,
+ * location request, and voice-call button.
+ */
+export type WhatsAppInteractive =
+  | {
+      type: "button";
+      header?: WhatsAppInteractiveHeader;
+      body: { text: string };
+      footer?: { text: string };
+      action: { buttons: Array<{ type: "reply"; reply: { id: string; title: string } }> };
+    }
+  | {
+      type: "list";
+      header?: WhatsAppInteractiveHeader;
+      body: { text: string };
+      footer?: { text: string };
+      action: {
+        button: string;
+        sections: Array<{
+          title?: string;
+          rows: Array<{ id: string; title: string; description?: string }>;
+        }>;
+      };
+    }
+  | {
+      type: "cta_url";
+      header?: WhatsAppInteractiveHeader;
+      body: { text: string };
+      footer?: { text: string };
+      action: { name: "cta_url"; parameters: { display_text: string; url: string } };
+    }
+  | {
+      type: "flow";
+      header?: WhatsAppInteractiveHeader;
+      body: { text: string };
+      footer?: { text: string };
+      action: {
+        name: "flow";
+        parameters: {
+          flow_message_version?: "3";
+          flow_token: string;
+          flow_id: string;
+          flow_cta: string;
+          flow_action: "navigate" | "data_exchange";
+          flow_action_payload?: { screen: string; data?: Record<string, unknown> };
+          mode?: "draft";
+        };
+      };
+    }
+  | {
+      type: "location_request_message";
+      body: { text: string };
+      action?: { name: "send_location" };
+    }
+  | {
+      type: "voice_call";
+      body: { text: string };
+      action: {
+        name: "voice_call";
+        parameters?: { display_text?: string; ttl_minutes?: number; payload?: string };
+      };
+    };
 
 /** Conversation data returned from the Zernio API. */
 export interface ZernioConversation {
@@ -269,4 +434,32 @@ export interface ZernioConversationListResponse {
     hasMore: boolean;
     nextCursor: string | null;
   };
+}
+
+/**
+ * Body for POST /v1/inbox/conversations — cold-start a conversation from a
+ * recipient. WhatsApp requires an approved template (`templateName` +
+ * `templateLanguage`) since you can't open outside the 24h window without one;
+ * other platforms can open with a plain `message`.
+ */
+export interface ZernioCreateConversationBody {
+  accountId: string;
+  /** Recipient handle: phone/E.164 for WhatsApp, platform user id otherwise. */
+  participantId?: string;
+  participantUsername?: string;
+  message?: string;
+  /** WhatsApp approved template name (required for WhatsApp cold-start). */
+  templateName?: string;
+  /** WhatsApp template language code (e.g. "en_US"). */
+  templateLanguage?: string;
+  /** Ordered template body variable values. */
+  templateParams?: string[];
+}
+
+/** Response data from POST /v1/inbox/conversations. */
+export interface ZernioCreateConversationData {
+  messageId: string;
+  conversationId: string;
+  participantId: string;
+  participantName: string;
 }

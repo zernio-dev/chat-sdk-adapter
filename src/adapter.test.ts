@@ -143,6 +143,53 @@ describe("Thread ID encode/decode", () => {
   });
 });
 
+// ─── openDM / openConversation ──────────────────────────────────────────────
+
+describe("openDM", () => {
+  const adapter = new ZernioAdapter(TEST_CONFIG);
+
+  it("resolves an account-namespaced recipient to a thread id (no network)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const threadId = await adapter.openDM("acc-123:16505551234");
+    expect(threadId).toBe("zernio:acc-123:16505551234");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("throws when the recipient is not account-namespaced", async () => {
+    await expect(adapter.openDM("16505551234")).rejects.toThrow(ValidationError);
+    await expect(adapter.openDM("acc-123:")).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("openConversation", () => {
+  const adapter = new ZernioAdapter(TEST_CONFIG);
+  afterEach(() => vi.restoreAllMocks());
+
+  it("cold-starts a WhatsApp conversation with a template and returns the thread id", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ success: true, data: { conversationId: "16505551234", messageId: "wamid.1", participantId: "16505551234", participantName: "16505551234" } }),
+        { status: 201 },
+      ),
+    );
+    const threadId = await adapter.openConversation({
+      accountId: "acc-9",
+      to: "16505551234",
+      template: { name: "welcome", language: "en_US", params: ["Ana"] },
+    });
+    expect(threadId).toBe("zernio:acc-9:16505551234");
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      accountId: "acc-9",
+      participantId: "16505551234",
+      templateName: "welcome",
+      templateLanguage: "en_US",
+      templateParams: ["Ana"],
+    });
+  });
+});
+
 // ─── parseMessage Tests ─────────────────────────────────────────────────────
 
 describe("parseMessage", () => {
@@ -287,6 +334,46 @@ describe("handleWebhook", () => {
     expect(adapterArg).toBe(adapter);
     expect(threadIdArg).toBe("zernio:acc-789:conv-456");
     expect(typeof factoryArg).toBe("function");
+  });
+
+  it("surfaces WhatsApp interactive-reply metadata on message.raw.metadata", async () => {
+    const payload = makeWebhookPayload({
+      metadata: { interactiveType: "list_reply", interactiveId: "row-pro" },
+    } as any);
+    const body = JSON.stringify(payload);
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "X-Zernio-Signature": signPayload(body),
+        "X-Zernio-Event": "message.received",
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+
+    await adapter.handleWebhook(request);
+    const [, , factoryArg] = mockChat.processMessage.mock.calls[0];
+    const message = await factoryArg();
+    expect(message.raw.metadata).toEqual({ interactiveType: "list_reply", interactiveId: "row-pro" });
+  });
+
+  it("skips call.* and message-status events (not Chat SDK concepts)", async () => {
+    for (const event of ["call.received", "call.ended", "message.delivered", "message.read"]) {
+      const body = JSON.stringify({ id: "e", event, timestamp: "t" });
+      const request = new Request("https://example.com/webhook", {
+        method: "POST",
+        headers: {
+          "X-Zernio-Signature": signPayload(body),
+          "X-Zernio-Event": event,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
+      const response = await adapter.handleWebhook(request);
+      expect(response.status).toBe(200);
+    }
+    expect(mockChat.processMessage).not.toHaveBeenCalled();
+    expect(mockChat.processReaction).not.toHaveBeenCalled();
   });
 
   it("skips outgoing messages (prevents echo loop)", async () => {

@@ -17,6 +17,12 @@ import type {
   ZernioConversationListResponse,
   ZernioMessageListResponse,
   ZernioSendMessageBody,
+  ZernioCreateConversationBody,
+  ZernioCreateConversationData,
+  WhatsAppInteractive,
+  WhatsAppLocation,
+  WhatsAppContact,
+  WhatsAppTemplate,
 } from "./types.js";
 
 /** Adapter name used in error constructors. */
@@ -47,6 +53,69 @@ export class ZernioApiClient {
       body,
     );
     return result.data ?? {};
+  }
+
+  // ─── WhatsApp rich messages ───────────────────────────────────────────────
+  // Typed convenience wrappers over sendMessage for WhatsApp content the
+  // chat-sdk Card abstraction can't express (location, contacts, the full
+  // interactive set, approved templates, quoted replies). Each just shapes the
+  // send body; the routing, auth, and error handling are shared with sendMessage.
+
+  /**
+   * Send a WhatsApp interactive message: reply buttons, list, cta_url button,
+   * flow, location-request, or voice-call button. `extra` carries an optional
+   * `replyTo` (quote) — pass the platform message id to reply to.
+   */
+  async sendInteractive(
+    conversationId: string,
+    accountId: string,
+    interactive: WhatsAppInteractive,
+    extra?: { replyTo?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, { accountId, interactive, ...extra });
+  }
+
+  /** Send a WhatsApp location pin. */
+  async sendLocation(
+    conversationId: string,
+    accountId: string,
+    location: WhatsAppLocation,
+  ): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, { accountId, location });
+  }
+
+  /** Send one or more WhatsApp contact cards (vCard). */
+  async sendContacts(
+    conversationId: string,
+    accountId: string,
+    contacts: WhatsAppContact[],
+  ): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, { accountId, contacts });
+  }
+
+  /**
+   * Send an approved WhatsApp template message (re-opens the 24h window).
+   * `components` are the WhatsApp template component parameters.
+   */
+  async sendTemplate(
+    conversationId: string,
+    accountId: string,
+    template: WhatsAppTemplate,
+  ): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, { accountId, template: { elements: [template] } });
+  }
+
+  /**
+   * Reply to (quote) a specific message with text. `replyTo` is the platform
+   * message id being quoted (WhatsApp `context.message_id`).
+   */
+  async reply(
+    conversationId: string,
+    accountId: string,
+    replyTo: string,
+    message: string,
+  ): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, { accountId, message, replyTo });
   }
 
   /**
@@ -91,6 +160,24 @@ export class ZernioApiClient {
       "GET",
       `/v1/inbox/conversations/${conversationId}/messages?${params.toString()}`,
     );
+  }
+
+  /**
+   * Cold-start a conversation from a recipient (no prior inbound needed).
+   * POST /v1/inbox/conversations
+   *
+   * WhatsApp requires an approved template; other platforms can open with a
+   * plain `message`. Returns the created/existing conversation id.
+   */
+  async createConversation(
+    body: ZernioCreateConversationBody,
+  ): Promise<ZernioCreateConversationData> {
+    const result = await this.request<{ success: boolean; data: ZernioCreateConversationData }>(
+      "POST",
+      `/v1/inbox/conversations`,
+      body,
+    );
+    return result.data;
   }
 
   /**

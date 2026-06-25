@@ -130,7 +130,10 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 | Feature | Supported | Notes |
 |---------|-----------|-------|
 | Send messages | Yes | Text messages across all platforms |
-| Rich messages (cards) | Yes | Buttons and templates on FB, IG, Telegram, WhatsApp |
+| Rich messages (cards) | Yes | Buttons + templates on FB, IG, Telegram, WhatsApp; card `Select`/`RadioSelect` → WhatsApp interactive **list** |
+| WhatsApp rich messages | Yes | Interactive lists, cta_url buttons, flows, location-request + voice-call buttons, location pins, contact cards, approved templates, quoted replies — via `ZernioApiClient` ([see below](#whatsapp-rich-messages)) |
+| Inbound interactive replies | Yes | Button taps, list selections, and flow responses on `message.raw.metadata` ([see below](#inbound-interactive-replies)) |
+| Open conversation by recipient | Yes | `openDM` / `openConversation` — cold-start a chat from a phone number ([see below](#opening-conversations)) |
 | Edit messages | Partial | Telegram only |
 | Delete messages | Partial | Telegram, X (full delete); Bluesky, Reddit (self-only) |
 | Send reactions | Partial | Telegram and WhatsApp (add/remove emoji) |
@@ -149,6 +152,9 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 |---------|----|----|----------|----------|---|---------|--------|
 | Send text | Y | Y | Y | Y | Y | Y | Y |
 | Buttons | Y | Y | Y | Y | - | - | - |
+| Lists | - | - | - | Y | - | - | - |
+| Location / Contacts | - | - | - | Y | - | - | - |
+| Templates / Flows | - | - | - | Y | - | - | - |
 | Typing | Y | - | Y | Y | - | - | - |
 | Delete | - | - | Y | - | Y | Self | Self |
 | Reactions | - | - | Y | Y | - | - | - |
@@ -178,6 +184,108 @@ await thread.post(
 );
 // Renders as interactive card on FB/IG/Telegram/WhatsApp
 // Falls back to text on X/Bluesky/Reddit
+```
+
+A card `Select` or `RadioSelect` is mapped to a WhatsApp **interactive list** (it can't coexist with reply buttons, so the list takes precedence):
+
+```typescript
+import { Card, Actions, Select, SelectOption } from "chat";
+
+await thread.post(
+  Card({
+    title: "Pick a plan",
+    children: [
+      Actions([
+        Select({
+          id: "plan",
+          placeholder: "Choose plan", // becomes the list's open button (max 20 chars)
+          options: [
+            SelectOption({ label: "Basic", value: "basic", description: "$10/mo" }),
+            SelectOption({ label: "Pro", value: "pro" }),
+          ],
+        }),
+      ]),
+    ],
+  })
+);
+```
+
+## WhatsApp Rich Messages
+
+WhatsApp-only message types that don't map to a Chat SDK card are sent through the exported [`ZernioApiClient`](#api-client), used alongside the adapter. Decode a thread id to get the `accountId` + `conversationId`:
+
+```typescript
+import { ZernioApiClient } from "@zernio/chat-sdk-adapter";
+
+const client = new ZernioApiClient(process.env.ZERNIO_API_KEY!, "https://zernio.com/api");
+const { accountId, conversationId } = adapter.decodeThreadId(threadId);
+
+// Reply buttons / list / cta_url / flow / location-request / voice-call button
+await client.sendInteractive(conversationId, accountId, {
+  type: "cta_url",
+  body: { text: "View your order" },
+  action: { name: "cta_url", parameters: { display_text: "Open", url: "https://example.com/o/123" } },
+});
+
+// Location pin
+await client.sendLocation(conversationId, accountId, {
+  latitude: 41.3874, longitude: 2.1686, name: "HQ", address: "Barcelona",
+});
+
+// Contact cards (vCard)
+await client.sendContacts(conversationId, accountId, [
+  { name: { formatted_name: "Ana Ruiz" }, phones: [{ phone: "+34600000000", type: "WORK" }] },
+]);
+
+// Approved template (re-opens the 24h window)
+await client.sendTemplate(conversationId, accountId, { name: "order_update", language: "en_US" });
+
+// Quote / reply to a specific message
+await client.reply(conversationId, accountId, "wamid.HBg...", "Thanks, on it!");
+```
+
+`sendInteractive` accepts the full WhatsApp interactive union: `button`, `list`, `cta_url`, `flow`, `location_request_message`, and `voice_call`. Pass `{ replyTo }` as the 4th arg to quote a message.
+
+## Inbound Interactive Replies
+
+When a user taps a reply button, picks a list row, or submits a WhatsApp Flow, it arrives as a normal `onNewMessage` whose interactive context is on `message.raw.metadata`:
+
+```typescript
+bot.onNewMessage(/.*/, async (thread, message) => {
+  const meta = (message.raw as any).metadata;
+  if (meta?.interactiveType === "button_reply" || meta?.interactiveType === "list_reply") {
+    // The id you set when sending the button/row
+    await thread.post(`You picked: ${meta.interactiveId}`);
+  }
+  if (meta?.interactiveType === "nfm_reply") {
+    const form = meta.flowResponseData; // parsed Flow response
+  }
+  // meta.referral  -> Click-to-WhatsApp ad attribution (when the chat started from an ad)
+  // meta.quotedMessageId -> the message this one replies to
+});
+```
+
+## Opening Conversations
+
+Start a chat with someone who hasn't messaged you yet.
+
+`openDM(userId)` is the standard Chat SDK method. Because one Zernio account = one channel, namespace the recipient as `"{accountId}:{recipient}"` (a phone/E.164 for WhatsApp). It's resolution-only — no network call — and the first `post()` opens the thread:
+
+```typescript
+const thread = await bot.openDM("507f1f77bcf86cd799439011:16505551234");
+await thread.post("Hi!"); // WhatsApp: the first message must be a template (see below)
+```
+
+For WhatsApp you must open with an approved template (the 24h-window rule). `openConversation` sends it and returns the thread id in one step:
+
+```typescript
+const threadId = await adapter.openConversation({
+  accountId: "507f1f77bcf86cd799439011",
+  to: "16505551234",
+  template: { name: "welcome", language: "en_US", params: ["Ana"] },
+});
+// Non-WhatsApp platforms can open with a plain message instead:
+// await adapter.openConversation({ accountId, to, message: "Hi!" });
 ```
 
 ## AI Streaming
@@ -272,6 +380,17 @@ await client.addReaction(conversationId, messageId, accountId, "👍");
 
 // Upload media
 const { url } = await client.uploadMedia(fileBuffer, "image/jpeg");
+
+// Cold-start a conversation from a recipient (WhatsApp needs a template)
+const convo = await client.createConversation({
+  accountId,
+  participantId: "16505551234",
+  templateName: "welcome",
+  templateLanguage: "en_US",
+});
+
+// WhatsApp rich sends: sendInteractive, sendLocation, sendContacts,
+// sendTemplate, reply — see "WhatsApp Rich Messages" above.
 ```
 
 ## Webhook Verification
