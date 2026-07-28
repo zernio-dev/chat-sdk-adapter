@@ -49,6 +49,45 @@ describe("ZernioApiClient", () => {
     });
   });
 
+  // ─── sendTyping ─────────────────────────────────────────────────────────
+
+  describe("sendTyping", () => {
+    it("sends a POST request to the typing endpoint and returns the success flag", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true }), { status: 200 }),
+      );
+
+      const sent = await client.sendTyping("conv-123", "acc-456");
+
+      expect(sent).toBe(true);
+      expect(fetch).toHaveBeenCalledWith(
+        `${baseUrl}/v1/inbox/conversations/conv-123/typing`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ accountId: "acc-456" }),
+        }),
+      );
+    });
+
+    it("returns false when the platform call failed server-side (HTTP 200, success:false)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: false }), { status: 200 }),
+      );
+
+      await expect(client.sendTyping("conv-123", "acc-456")).resolves.toBe(false);
+    });
+
+    it("propagates typed errors so callers can diagnose failures", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+      );
+
+      await expect(client.sendTyping("conv-123", "acc-456")).rejects.toBeInstanceOf(
+        AuthenticationError,
+      );
+    });
+  });
+
   // ─── editMessage ────────────────────────────────────────────────────────
 
   describe("editMessage", () => {
