@@ -713,15 +713,24 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
 
   /**
    * Show a typing indicator.
-   * Supported on: Facebook Messenger (sender_action), Telegram (sendChatAction).
-   * No-op on platforms without typing indicator support.
+   * Supported on: Facebook Messenger and Instagram (sender_action), Telegram
+   * (sendChatAction), WhatsApp (requires a recent inbound message in the
+   * conversation). No-op on platforms without typing indicator support.
    */
   async startTyping(threadId: string, _status?: string): Promise<void> {
     const { accountId, conversationId } = this.decodeThreadId(threadId);
     try {
-      await this.api.sendTyping(conversationId, accountId);
-    } catch {
-      // Silently ignore errors (typing indicators are best-effort)
+      const sent = await this.api.sendTyping(conversationId, accountId);
+      if (!sent) {
+        this.logger.debug(
+          `Typing indicator not sent for conversation ${conversationId} (unsupported platform or platform call failed)`,
+        );
+      }
+    } catch (error) {
+      // Typing indicators are best-effort: log for diagnosability, never throw
+      this.logger.debug(
+        `Failed to send typing indicator for conversation ${conversationId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

@@ -228,16 +228,23 @@ export class ZernioApiClient {
    * Send a typing indicator for a conversation.
    * POST /v1/inbox/conversations/{conversationId}/typing
    *
-   * Supported on Facebook Messenger, Telegram, and WhatsApp. No-op on
-   * other platforms. WhatsApp additionally requires a recent inbound
+   * Supported on Facebook Messenger, Instagram, Telegram, and WhatsApp.
+   * No-op on other platforms. WhatsApp additionally requires a recent inbound
    * message in the conversation (Meta references the inbound message id).
+   * On Instagram the indicator is only visible while the recipient is signed
+   * in to Instagram.
+   *
+   * The endpoint returns HTTP 200 even when the platform call fails; the
+   * returned boolean reports whether a typing indicator was actually sent
+   * (false on unsupported platforms or when the platform rejected the call).
    */
-  async sendTyping(conversationId: string, accountId: string): Promise<void> {
-    await this.request<{ success: boolean }>(
+  async sendTyping(conversationId: string, accountId: string): Promise<boolean> {
+    const res = await this.request<{ success: boolean }>(
       "POST",
       `/v1/inbox/conversations/${conversationId}/typing`,
       { accountId },
     );
+    return res.success;
   }
 
   // ─── Delete ─────────────────────────────────────────────────────────────

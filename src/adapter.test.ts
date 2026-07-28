@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createHmac } from "node:crypto";
 import { Message } from "chat";
 import { ValidationError, AdapterError } from "@chat-adapter/shared";
@@ -566,11 +566,13 @@ describe("handleWebhook", () => {
 
 describe("API-backed methods", () => {
   let adapter: ZernioAdapter;
+  let mockLogger: { info: Mock; warn: Mock; error: Mock; debug: Mock };
 
   beforeEach(() => {
     adapter = new ZernioAdapter(TEST_CONFIG);
+    mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     adapter.initialize({
-      getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+      getLogger: () => mockLogger,
       processMessage: vi.fn(),
     } as any);
   });
@@ -616,11 +618,25 @@ describe("API-backed methods", () => {
       new Response(JSON.stringify({ success: true }), { status: 200 }),
     );
     await expect(adapter.startTyping("zernio:acc-1:conv-2")).resolves.toBeUndefined();
+    expect(mockLogger.debug).not.toHaveBeenCalled();
   });
 
-  it("startTyping silently swallows errors", async () => {
+  it("startTyping logs at debug level when the server reports the indicator was not sent", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: false }), { status: 200 }),
+    );
+    await expect(adapter.startTyping("zernio:acc-1:conv-2")).resolves.toBeUndefined();
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Typing indicator not sent for conversation conv-2"),
+    );
+  });
+
+  it("startTyping does not throw on errors and logs them at debug level", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network down"));
     await expect(adapter.startTyping("zernio:acc-1:conv-2")).resolves.toBeUndefined();
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to send typing indicator for conversation conv-2"),
+    );
   });
 
   it("postMessage sends text via API", async () => {
