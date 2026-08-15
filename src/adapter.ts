@@ -269,9 +269,10 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
         added: reaction.action === "added",
         emoji: emojiValue,
         rawEmoji: reaction.emoji,
-        // The message that was reacted to. Prefer the Zernio id; fall back to the
-        // platform id (always present).
-        messageId: reaction.messageId ?? reaction.platformMessageId,
+        // The message that was reacted to: the platform-native id, consistent
+        // with Message.id everywhere else in the adapter, so handlers can pass
+        // it straight back to addReaction/editMessage/deleteMessage (issue #9).
+        messageId: reaction.platformMessageId || reaction.messageId || "",
         threadId,
         user: {
           userId: reaction.sender.id,
@@ -334,7 +335,12 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     const text = raw.text ?? "";
 
     return new Message<ZernioRawMessage>({
-      id: raw.id,
+      // The platform-native id, not the Zernio internal id: message ops
+      // (reactions, edit, delete) send this id to the Zernio API, which
+      // forwards it verbatim to the platform. The internal id made every such
+      // op on a webhook-received message fail (issue #9), and REST fetches +
+      // postMessage already return platform ids. The Zernio id stays on raw.id.
+      id: raw.platformMessageId || raw.id,
       threadId: "",  // Set by chat-sdk's processMessage
       text,
       formatted: this.converter.toAst(text),
@@ -575,7 +581,7 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
 
   /**
    * Add a reaction to a message.
-   * Supported on: Telegram (emoji reactions), WhatsApp (emoji reactions).
+   * Supported on: Telegram, WhatsApp, Slack, Instagram, Facebook Messenger.
    * Unsupported on other platforms (API returns 400).
    */
   async addReaction(
@@ -584,13 +590,17 @@ export class ZernioAdapter implements Adapter<ZernioThreadId, ZernioRawMessage> 
     emoji: EmojiValue | string,
   ): Promise<void> {
     const { accountId, conversationId } = this.decodeThreadId(threadId);
-    const emojiStr = typeof emoji === "string" ? emoji : emoji.name;
+    // Zernio's wire format is the unicode character. toGChat maps an EmojiValue
+    // or normalized name ("thumbs_up") to unicode and passes through anything it
+    // doesn't know (an already-unicode "👍"). Sending emoji.name made every
+    // platform reject the reaction (issue #9).
+    const emojiStr = defaultEmojiResolver.toGChat(emoji);
     await this.api.addReaction(conversationId, messageId, accountId, emojiStr);
   }
 
   /**
    * Remove a reaction from a message.
-   * Supported on: Telegram (send empty reaction), WhatsApp (send empty emoji).
+   * Supported on: Telegram, WhatsApp, Slack, Instagram, Facebook Messenger.
    * Unsupported on other platforms (API returns 400).
    *
    * Note: The `emoji` parameter is required by the chat-sdk Adapter interface but

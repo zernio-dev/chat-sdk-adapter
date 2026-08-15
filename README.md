@@ -136,7 +136,7 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 | Open conversation by recipient | Yes | `openDM` / `openConversation` — cold-start a chat from a phone number ([see below](#opening-conversations)) |
 | Edit messages | Partial | Telegram only |
 | Delete messages | Partial | Telegram, X (full delete); Bluesky, Reddit (self-only) |
-| Send reactions | Partial | Telegram and WhatsApp (add/remove emoji) |
+| Send reactions | Partial | Telegram, WhatsApp, Instagram, Facebook Messenger (add/remove emoji) |
 | Receive reactions (`onReaction`) | Partial | WhatsApp, Telegram (via the `reaction.received` webhook) |
 | Typing indicators | Partial | Facebook Messenger, Instagram, and Telegram; WhatsApp (requires a recent inbound message in the conversation) |
 | AI streaming | Partial | Post+edit on Telegram; single post on others |
@@ -157,7 +157,7 @@ const { accountId, conversationId } = adapter.decodeThreadId(threadId);
 | Templates / Flows | - | - | - | Y | - | - | - |
 | Typing | Y | Y | Y | Y | - | - | - |
 | Delete | - | - | Y | - | Y | Self | Self |
-| Reactions | - | - | Y | Y | - | - | - |
+| Reactions | Y | Y | Y | Y | - | - | - |
 | Media | Y | Y | Y | Y | Y | - | - |
 | Edit | - | - | Y | - | - | - | - |
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createHmac } from "node:crypto";
-import { Message } from "chat";
+import { Message, defaultEmojiResolver } from "chat";
 import { ValidationError, AdapterError } from "@chat-adapter/shared";
 import { ZernioAdapter } from "./adapter.js";
 import type { ZernioRawMessage, ZernioWebhookPayload } from "./types.js";
@@ -200,9 +200,20 @@ describe("parseMessage", () => {
     const msg = adapter.parseMessage(raw);
 
     expect(msg).toBeInstanceOf(Message);
-    expect(msg.id).toBe("msg-123");
+    // The platform-native id, NOT the Zernio internal id: every outbound
+    // message op (reactions, edit, delete) passes this id to the Zernio API,
+    // which forwards it verbatim to the platform. Using the internal id made
+    // every reaction on a webhook-received message fail (issue #9). It also
+    // matches the ids returned by REST fetches and postMessage.
+    expect(msg.id).toBe("ig-msg-789");
     expect(msg.text).toBe("Hello from Instagram");
     expect(msg.raw).toBe(raw);
+  });
+
+  it("falls back to the Zernio id when platformMessageId is missing", () => {
+    const raw = makeRawMessage({ platformMessageId: "" });
+    const msg = adapter.parseMessage(raw);
+    expect(msg.id).toBe("msg-123");
   });
 
   it("maps author fields correctly", () => {
@@ -499,7 +510,9 @@ describe("handleWebhook", () => {
     expect(event.threadId).toBe("zernio:acc-789:conv-456");
     expect(event.added).toBe(true);
     expect(event.rawEmoji).toBe("👍");
-    expect(event.messageId).toBe("msg-zernio-1");
+    // Platform-native id, consistent with Message.id everywhere else in the
+    // adapter, so handlers can react/edit/delete using event.messageId.
+    expect(event.messageId).toBe("wamid.REACTED");
     expect(event.user.userId).toBe("13866666863");
     // Normalized to a known name via the unicode resolver.
     expect(event.emoji.name).toBe("thumbs_up");
@@ -600,6 +613,19 @@ describe("API-backed methods", () => {
     const body = JSON.parse((fetch as any).mock.calls[0][1].body);
     expect(body.emoji).toBe("👍");
     expect(body.accountId).toBe("acc-1");
+  });
+
+  it("addReaction converts an EmojiValue to the unicode emoji, not its name (issue #9)", async () => {
+    // Regression: chat-sdk hands the adapter EmojiValue objects; sending
+    // emoji.name ("thumbs_up") made every platform reject the reaction.
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    const emojiValue = defaultEmojiResolver.fromGChat("👍");
+    expect(emojiValue.name).toBe("thumbs_up");
+    await adapter.addReaction("zernio:acc-1:conv-2", "msg-3", emojiValue);
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.emoji).toBe("👍");
   });
 
   it("removeReaction calls the API DELETE endpoint", async () => {
